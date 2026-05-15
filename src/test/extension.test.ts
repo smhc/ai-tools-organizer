@@ -11,7 +11,7 @@ import { SkillInstallationService } from '../services/installationService';
 import { SkillPathService } from '../services/skillPathService';
 import { Skill, SkillRepository, InstalledSkill } from '../types';
 import { GitHubSkillsClient } from '../github/skillsClient';
-import { buildItemPathReference, parseGitHubUrl } from '../extension';
+import { buildItemPathReference, parseGitHubUrl, parseAzureDevOpsGitUrl } from '../extension';
 import { AreaInstalledItemTreeItem, AreaItemFileTreeItem, AreaItemFolderTreeItem } from '../views/installedAreaProvider';
 import { InstalledSkillTreeItem, SkillFileTreeItem, SkillFolderTreeItem } from '../views/installedProvider';
 // import * as myExtension from '../../extension';
@@ -609,6 +609,44 @@ suite('Extension Test Suite', () => {
 
 		test('rejects random non-URL string', () => {
 			assert.strictEqual(parseGitHubUrl('not a url at all'), undefined);
+		});
+	});
+
+	suite('parseAzureDevOpsGitUrl', () => {
+		test('parses plain dev.azure.com URL', () => {
+			const result = parseAzureDevOpsGitUrl('https://dev.azure.com/myOrg/myProject/_git/myRepo');
+			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: undefined });
+		});
+
+		test('strips credential prefix (user@)', () => {
+			const result = parseAzureDevOpsGitUrl('https://myUser@dev.azure.com/myOrg/myProject/_git/myRepo');
+			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: undefined });
+		});
+
+		test('extracts branch from version=GB query param', () => {
+			const result = parseAzureDevOpsGitUrl('https://dev.azure.com/myOrg/myProject/_git/myRepo?version=GBdevelop');
+			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: 'develop' });
+		});
+
+		test('strips .git suffix from repo name', () => {
+			const result = parseAzureDevOpsGitUrl('https://dev.azure.com/myOrg/myProject/_git/myRepo.git');
+			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: undefined });
+		});
+
+		test('returns undefined for GitHub URL', () => {
+			assert.strictEqual(parseAzureDevOpsGitUrl('https://github.com/owner/repo'), undefined);
+		});
+
+		test('returns undefined for non-_git ADO URL', () => {
+			assert.strictEqual(parseAzureDevOpsGitUrl('https://dev.azure.com/myOrg/myProject/_boards/board'), undefined);
+		});
+
+		test('returns undefined for empty string', () => {
+			assert.strictEqual(parseAzureDevOpsGitUrl(''), undefined);
+		});
+
+		test('returns undefined for random string', () => {
+			assert.strictEqual(parseAzureDevOpsGitUrl('not a url at all'), undefined);
 		});
 	});
 

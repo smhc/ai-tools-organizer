@@ -6,7 +6,16 @@ Open VS Code Settings (`Ctrl+,` / `Cmd+,`) and search for "AI Tools Organizer".
 
 **Setting**: `AIToolsOrganizer.skillRepositories`
 
-An array of GitHub repositories to browse in the Marketplace. Each entry has `owner`, `repo`, and `branch` fields. You can edit these directly in the Settings UI or add repositories using the **+** button in the Marketplace toolbar.
+An array of repositories to browse in the Marketplace. Supports both **GitHub** and **Azure DevOps** repositories. Each entry has `owner`, `repo`, and `branch` fields. Azure DevOps entries also require a `project` field.
+
+| Field | GitHub | Azure DevOps |
+|---|---|---|
+| `owner` | GitHub user or org | ADO organization name |
+| `repo` | Repository name | Git repository name |
+| `branch` | Branch name | Branch name |
+| `project` | _(not used)_ | **Required** — ADO project name |
+
+You can edit these directly in the Settings UI or add repositories using the **+** button in the Marketplace toolbar.
 
 ![User Settings (JSON) - Skill Repositories](../resources/docs/user-settings-skill-repositories.png)
 
@@ -50,6 +59,12 @@ The configured download location from `AIToolsOrganizer.installLocations` is als
 **Setting**: `AIToolsOrganizer.githubToken`
 
 Optional. Provides higher GitHub API rate limits when browsing many repositories. Create a token at [GitHub Settings](https://github.com/settings/tokens) with `public_repo` scope.
+
+## Azure DevOps token
+
+**Setting**: `AIToolsOrganizer.azureDevOpsPat`
+
+Required when using private Azure DevOps repositories or organization-level projects. Create a Personal Access Token in your Azure DevOps organization with **Code (read)** permission. Leave blank for public projects that allow anonymous access.
 
 ## Cache timeout
 

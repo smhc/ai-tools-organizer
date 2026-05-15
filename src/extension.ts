@@ -11,7 +11,7 @@ import { InstalledAreaTreeDataProvider, AreaInstalledItemTreeItem, AreaLocationT
 import { SkillDetailPanel } from './views/skillDetailPanel';
 import { SkillInstallationService } from './services/installationService';
 import { SkillPathService } from './services/skillPathService';
-import { Skill, InstalledSkill, SkillRepository, isSameRepository, normalizeSeparators, buildGitHubUrl, readRepositoriesConfig, writeRepositoriesConfig, AreaFileItem, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea } from './types';
+import { Skill, InstalledSkill, SkillRepository, isSameRepository, normalizeSeparators, buildGitHubUrl, buildRepoWebUrl, formatRepoLabel, readRepositoriesConfig, writeRepositoriesConfig, AreaFileItem, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea } from './types';
 import { PLUGIN_SUBFOLDER_TO_AREA, PLUGIN_AREA_SUBFOLDERS, AREA_TO_PLUGIN_SUBFOLDER, resolveInstalledItemUri, syncPluginItem } from './services/pluginSyncService';
 
 /**
@@ -180,6 +180,52 @@ export function parseGitHubUrl(input: string): { owner: string; repo: string; br
 
     const branch = parts[3];
     return { owner, repo, branch };
+}
+
+/**
+ * Parse an Azure DevOps Git URL into its SkillRepository components.
+ * Handles:
+ *   https://dev.azure.com/{org}/{project}/_git/{repo}
+ *   https://{user}@dev.azure.com/{org}/{project}/_git/{repo}
+ *   The above with an optional `version=GB{branch}` query parameter.
+ *
+ * Returns undefined when the input cannot be parsed as an ADO Git URL.
+ * `branch` is undefined when not present in the URL (caller should resolve via API).
+ */
+export function parseAzureDevOpsGitUrl(input: string): { owner: string; project: string; repo: string; branch: string | undefined } | undefined {
+    const trimmed = input.trim();
+
+    // Strip credentials prefix (e.g. "user@") from the host
+    const withoutCreds = trimmed.replace(/^(https?:\/\/)[^@]+@/, '$1');
+
+    let url: URL;
+    try {
+        url = new URL(withoutCreds);
+    } catch {
+        return undefined;
+    }
+
+    if (url.hostname !== 'dev.azure.com') {
+        return undefined;
+    }
+
+    // Path: /{org}/{project}/_git/{repo}[/...]
+    const parts = url.pathname.split('/').filter(p => p.length > 0);
+    if (parts.length < 4) { return undefined; }
+
+    const owner = parts[0];
+    const project = parts[1];
+    if (parts[2] !== '_git') { return undefined; }
+    const repo = parts[3].replace(/\.git$/, '');
+
+    // Optional branch from query: version=GB<branch>
+    let branch: string | undefined;
+    const version = url.searchParams.get('version');
+    if (version && version.startsWith('GB')) {
+        branch = version.slice(2) || undefined;
+    }
+
+    return { owner, project, repo, branch };
 }
 
 /**
@@ -2089,61 +2135,75 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('AIToolsOrganizer.openInBrowser', (item: SourceTreeItem | FailedSourceTreeItem | SkillTreeItem | SkillsGroupTreeItem | AreaGroupTreeItem | AreaFileTreeItem) => {
             if (item instanceof SkillTreeItem) {
                 const skill = item.skill;
-                const url = buildGitHubUrl(skill.source.owner, skill.source.repo, skill.source.branch, skill.skillPath);
+                const url = buildRepoWebUrl(skill.source, { kind: 'tree', path: skill.skillPath });
                 vscode.env.openExternal(vscode.Uri.parse(url));
             } else if (item instanceof SkillsGroupTreeItem || item instanceof AreaGroupTreeItem) {
                 const repo = item.parentSource.repo;
-                const url = buildGitHubUrl(repo.owner, repo.repo, repo.branch, item.areaPath);
+                const url = buildRepoWebUrl(repo, { kind: 'tree', path: item.areaPath });
                 vscode.env.openExternal(vscode.Uri.parse(url));
             } else if (item instanceof AreaFileTreeItem) {
                 const fi = item.fileItem;
-                // Use blob URL for files instead of tree URL
-                const safeBranch = encodeURIComponent(fi.source.branch);
-                const safePath = fi.filePath.split('/').map(encodeURIComponent).join('/');
-                const url = `https://github.com/${encodeURIComponent(fi.source.owner)}/${encodeURIComponent(fi.source.repo)}/blob/${safeBranch}/${safePath}`;
+                const url = buildRepoWebUrl(fi.source, { kind: 'blob', path: fi.filePath });
                 vscode.env.openExternal(vscode.Uri.parse(url));
             } else {
                 const repo = item instanceof SourceTreeItem ? item.repo : item.failure.repo;
-                const url = buildGitHubUrl(repo.owner, repo.repo, repo.branch, '');
+                const url = buildRepoWebUrl(repo, { kind: 'tree', path: '' });
                 vscode.env.openExternal(vscode.Uri.parse(url));
             }
         }),
 
-        // Add a new skill repository from a GitHub URL
+        // Add a new skill repository from a GitHub or Azure DevOps URL
         vscode.commands.registerCommand('AIToolsOrganizer.addRepository', async () => {
             const input = await vscode.window.showInputBox({
-                prompt: 'Enter a GitHub repository URL',
-                placeHolder: 'https://github.com/owner/repo',
+                prompt: 'Enter a GitHub or Azure DevOps repository URL',
+                placeHolder: 'https://github.com/owner/repo  or  https://dev.azure.com/org/project/_git/repo',
                 validateInput: value => {
                     if (!value?.trim()) { return 'URL is required'; }
-                    return parseGitHubUrl(value) ? undefined : 'Could not parse a GitHub repository URL from that input';
+                    return (parseGitHubUrl(value) || parseAzureDevOpsGitUrl(value))
+                        ? undefined
+                        : 'Could not parse a GitHub or Azure DevOps repository URL from that input';
                 }
             });
             if (!input) { return; }
 
-            const parsed = parseGitHubUrl(input)!;
+            const ghParsed = parseGitHubUrl(input);
+            const adoParsed = parseAzureDevOpsGitUrl(input);
 
-            // Resolve the actual default branch when it wasn't in the URL
+            let newRepo: SkillRepository;
             let branch: string;
-            try {
-                branch = parsed.branch ?? await githubClient.fetchDefaultBranch(parsed.owner, parsed.repo);
-            } catch {
-                vscode.window.showErrorMessage('Failed to fetch repository information. Please check the URL and your network connection.');
-                return;
-            }
 
-            const newRepo: SkillRepository = {
-                owner: parsed.owner,
-                repo: parsed.repo,
-                branch
-            };
+            if (adoParsed) {
+                // Build a temporary repo object for the ADO client call
+                const tempRepo: SkillRepository = {
+                    owner: adoParsed.owner,
+                    project: adoParsed.project,
+                    repo: adoParsed.repo,
+                    branch: adoParsed.branch ?? 'main'
+                };
+                try {
+                    branch = adoParsed.branch ?? await githubClient.fetchDefaultBranch(tempRepo);
+                } catch {
+                    vscode.window.showErrorMessage('Failed to fetch repository information from Azure DevOps. Check the URL, your network connection, and the AIToolsOrganizer.azureDevOpsPat setting.');
+                    return;
+                }
+                newRepo = { owner: adoParsed.owner, project: adoParsed.project, repo: adoParsed.repo, branch };
+            } else {
+                const parsed = ghParsed!;
+                try {
+                    branch = parsed.branch ?? await githubClient.fetchDefaultBranch({ owner: parsed.owner, repo: parsed.repo, branch: 'main' });
+                } catch {
+                    vscode.window.showErrorMessage('Failed to fetch repository information. Please check the URL and your network connection.');
+                    return;
+                }
+                newRepo = { owner: parsed.owner, repo: parsed.repo, branch };
+            }
 
             const repositories = readRepositoriesConfig();
 
             const isDuplicate = repositories.some(r => isSameRepository(r, newRepo));
             if (isDuplicate) {
                 vscode.window.showWarningMessage(
-                    `${newRepo.owner}/${newRepo.repo} is already in the marketplace.`
+                    `${formatRepoLabel(newRepo)} is already in the marketplace.`
                 );
                 return;
             }
@@ -2153,7 +2213,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 await writeRepositoriesConfig([...repositories, newRepo]);
                 await marketplaceProvider.addRepoToMarketplace(newRepo);
                 marketplaceProvider.setInstalledSkills(installedProvider.getInstalledSkillNames());
-                vscode.window.showInformationMessage(`Added ${newRepo.owner}/${newRepo.repo} to the marketplace.`);
+                vscode.window.showInformationMessage(`Added ${formatRepoLabel(newRepo)} to the marketplace.`);
             } catch (e) {
                 // Reset suppression so external config changes aren't silently ignored
                 marketplaceProvider.shouldHandleConfigChange();

@@ -1,6 +1,6 @@
 # Marketplace & Downloading
 
-The Marketplace view lets you browse AI tools from configured GitHub repositories.
+The Marketplace view lets you browse AI tools from configured GitHub or Azure DevOps repositories.
 
 ## Browsing
 
@@ -25,9 +25,13 @@ Downloaded items appear in the corresponding area view and get a green check in 
 
 ## Adding repositories
 
-Click the **+** button in the Marketplace toolbar and paste a GitHub URL. The extension parses the URL and resolves the default branch automatically.
+Click the **+** button in the Marketplace toolbar and paste a GitHub or Azure DevOps URL. The extension parses the URL and resolves the default branch automatically.
 
-You can also add repositories in Settings under `AIToolsOrganizer.skillRepositories`.
+Supported URL formats:
+- **GitHub**: `https://github.com/owner/repo` or `https://github.com/owner/repo/tree/branch`
+- **Azure DevOps**: `https://dev.azure.com/org/project/_git/repo`
+
+You can also add repositories in Settings under `AIToolsOrganizer.skillRepositories`. For Azure DevOps repositories, set the `project` field in addition to `owner`, `repo`, and `branch`.
 
 ## Searching
 

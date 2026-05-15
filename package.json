@@ -1,10 +1,10 @@
 {
   "name": "agent-organizer-cursor",
-  "displayName": "AI Tools Organizer - Cursor",
+  "displayName": "AI Tools Organizer (Cursor)",
   "description": "AI Tools Organizer and Marketplace",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "icon": "resources/logo.png",
-  "publisher": "smaglio81",
+  "publisher": "smhc",
   "engines": {
     "vscode": "^1.105.1"
   },
@@ -25,13 +25,12 @@
     "kiro"
   ],
   "bugs": {
-    "url": "https://github.com/smaglio81/ai-tools-organizer/issues",
-    "email": "smaglio81@gmail.com"
+    "url": "https://github.com/smhc/ai-tools-organizer/issues",
   },
-  "homepage": "https://github.com/smaglio81/ai-tools-organizer/blob/main/README.md",
+  "homepage": "https://github.com/smhc/ai-tools-organizer/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/smaglio81/ai-tools-organizer.git"
+    "url": "https://github.com/smhc/ai-tools-organizer.git"
   },
   "activationEvents": [
     "onView:AIToolsOrganizer.marketplace",
@@ -1550,22 +1549,26 @@
               "branch": "main"
             }
           ],
-          "markdownDescription": "GitHub repositories to fetch content from. Use the **Add Repository** button in the Marketplace view to add repos from a GitHub URL.",
+          "markdownDescription": "Repositories to fetch content from. Supports **GitHub** and **Azure DevOps** repositories. Use the **Add Repository** button in the Marketplace view to add repos from a URL.\n\n- GitHub: `{ \"owner\": \"...\", \"repo\": \"...\", \"branch\": \"main\" }`\n- Azure DevOps: `{ \"owner\": \"org\", \"project\": \"project\", \"repo\": \"repo\", \"branch\": \"main\" }`",
           "items": {
             "type": "object",
             "properties": {
               "owner": {
                 "type": "string",
-                "description": "GitHub repository owner"
+                "description": "GitHub owner or Azure DevOps organization name"
               },
               "repo": {
                 "type": "string",
-                "description": "GitHub repository name"
+                "description": "Repository name"
               },
               "branch": {
                 "type": "string",
                 "default": "main",
                 "description": "Branch name"
+              },
+              "project": {
+                "type": "string",
+                "description": "Azure DevOps project name (set this to use an Azure DevOps repository instead of GitHub)"
               }
             }
           }
@@ -1599,6 +1602,12 @@
           "type": "string",
           "default": "",
           "description": "GitHub personal access token for higher API rate limits (optional)",
+          "scope": "application"
+        },
+        "AIToolsOrganizer.azureDevOpsPat": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Azure DevOps Personal Access Token for accessing ADO Git repositories. Requires **Code (read)** permission. Only needed when using Azure DevOps repositories in `#AIToolsOrganizer.skillRepositories#`.",
           "scope": "application"
         },
         "AIToolsOrganizer.cacheTimeout": {

@@ -134,11 +134,21 @@ export type AreaPaths = Partial<Record<ContentArea, string>>;
 
 /**
  * Configuration for a repository source.
+ * When `project` is set the repository is hosted on Azure DevOps
+ * (owner = organization, project = ADO project name).
+ * When `project` is absent the repository is on GitHub.
  */
 export interface SkillRepository {
     owner: string;
     repo: string;
     branch: string;
+    /** Azure DevOps project name. Present only for ADO repos. */
+    project?: string;
+}
+
+/** Returns true when the repository is an Azure DevOps repo. */
+export function isAdoRepository(repo: SkillRepository): boolean {
+    return typeof repo.project === 'string' && repo.project.length > 0;
 }
 
 /**
@@ -350,12 +360,13 @@ export function collectBlockScalarValue(lines: string[], startIndex: number, ind
 
 /**
  * Compare two SkillRepository configs for identity equality.
- * Compares owner, repo, and branch.
+ * Compares owner, repo, branch, and (for ADO repos) project.
  */
 export function isSameRepository(left: SkillRepository, right: SkillRepository): boolean {
     return left.owner === right.owner &&
         left.repo === right.repo &&
-        left.branch === right.branch;
+        left.branch === right.branch &&
+        (left.project || '') === (right.project || '');
 }
 
 /**
@@ -368,6 +379,7 @@ export function normalizeSeparators(location: string): string {
 
 /**
  * Build a GitHub URL for a skill or repository path.
+ * @deprecated Use buildRepoWebUrl instead.
  */
 export function buildGitHubUrl(owner: string, repo: string, branch: string, skillPath: string): string {
     const safeBranch = encodeURIComponent(branch);
@@ -376,14 +388,54 @@ export function buildGitHubUrl(owner: string, repo: string, branch: string, skil
 }
 
 /**
+ * Build a web browser URL for a repository path, handling both GitHub and Azure DevOps.
+ * @param repo  Source repository config.
+ * @param opts  `kind`: whether to link to a tree (directory) or blob (file).
+ *              `path`: the path within the repo (empty string for repo root).
+ */
+export function buildRepoWebUrl(repo: SkillRepository, opts: { kind: 'tree' | 'blob'; path: string }): string {
+    const { kind, path } = opts;
+    if (isAdoRepository(repo)) {
+        const base = `https://dev.azure.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.project!)}/_git/${encodeURIComponent(repo.repo)}`;
+        const params = new URLSearchParams();
+        if (path) { params.set('path', path.startsWith('/') ? path : `/${path}`); }
+        params.set('version', `GB${repo.branch}`);
+        return `${base}?${params.toString()}`;
+    }
+    const safeBranch = encodeURIComponent(repo.branch);
+    const safePath = path.split('/').map(encodeURIComponent).join('/');
+    if (kind === 'blob') {
+        return `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/blob/${safeBranch}/${safePath}`;
+    }
+    return `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/tree/${safeBranch}/${safePath}`;
+}
+
+/**
+ * Return a concise human-readable label for a repository.
+ * GitHub: "owner/repo"
+ * Azure DevOps: "owner/project/repo"
+ */
+export function formatRepoLabel(repo: SkillRepository): string {
+    if (isAdoRepository(repo)) {
+        return `${repo.owner}/${repo.project}/${repo.repo}`;
+    }
+    return `${repo.owner}/${repo.repo}`;
+}
+
+/**
  * Normalize a SkillRepository read from user config.
  * Ensures branch defaults to 'main' when omitted.
  */
 export function normalizeRepository(repo: SkillRepository): SkillRepository {
-    return {
+    const normalized: SkillRepository = {
         ...repo,
         branch: repo.branch || 'main'
     };
+    // Remove project when empty so ADO discriminator stays clean
+    if (normalized.project !== undefined && normalized.project.length === 0) {
+        delete normalized.project;
+    }
+    return normalized;
 }
 
 /**
@@ -427,6 +479,10 @@ export function readRepositoriesConfig(): SkillRepository[] {
  */
 export async function writeRepositoriesConfig(repos: SkillRepository[]): Promise<void> {
     const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
-    const normalized = repos.map(r => ({ owner: r.owner, repo: r.repo, branch: r.branch || 'main' }));
+    const normalized = repos.map(r => {
+        const entry: Record<string, string> = { owner: r.owner, repo: r.repo, branch: r.branch || 'main' };
+        if (r.project) { entry['project'] = r.project; }
+        return entry;
+    });
     await config.update('skillRepositories', normalized, vscode.ConfigurationTarget.Global);
 }
