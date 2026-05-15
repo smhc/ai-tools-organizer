@@ -4,6 +4,22 @@ All notable changes to the "ai-tools-organizer" extension will be documented in 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+
+- **Fork / provenance**: This build is a fork of [smaglio81/ai-tools-organizer](https://github.com/smaglio81/ai-tools-organizer), published for the Cursor marketplace with Cursor-specific packaging and features.
+- **Azure DevOps Git URLs**: Marketplace repositories can be added with Azure DevOps clone URLs (`https://dev.azure.com/{organization}/{project}/_git/{repository}`, including optional branch query parameters). Tree and file content use the Azure DevOps Git Items API. Authentication uses `AIToolsOrganizer.azureDevOpsPat` or the `AZURE_DEVOPS_EXT_PAT` environment variable when the setting is unset.
+- **Cursor plugin support**: Repositories are scanned for `.cursor-plugin/` (and `marketplace.json` when present) alongside `.cursor` and `.claude`; declared plugin directories participate in scoped tree fetching so Cursor plugins are discovered without listing the entire repository.
+- **Rules area**: New "Rules" content area for Cursor rules (for example `.mdc` files), including marketplace discovery, installed view, default download location under `~/.cursor/rules`, and integration with the scoped subtree list.
+
+### Changed
+
+- Repository tree fetching is now scoped: instead of one full recursive listing of the entire repo, the extension performs a non-recursive root listing and then fetches only "interesting" top-level subtrees (`.cursor`, `.claude`, `.cursor-plugin`, plus conventional area directories such as `skills`, `agents`, `hooks`, `rules`, `instructions`, `plugins`, `prompts`). This significantly reduces API calls and payload size for large repositories that contain only a small number of AI tools.
+- `.github` is no longer scanned. Content previously discoverable via `.github/agents/` or similar paths will not appear in the Marketplace. Items published under conventional top-level directories or `.cursor`/`.claude` layouts continue to work as before.
+- When a `.cursor-plugin/marketplace.json` is present, each plugin directory declared in it is added to the scoped fetch set automatically, so plugins are always discovered without requiring a full repo tree.
+- `fetchSkillFiles` (used when downloading multi-file items) now fetches only the subtree under the item's top-level directory rather than the full repo tree.
+
 ## [0.2.2]
 
 ### Changed

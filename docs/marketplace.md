@@ -33,6 +33,18 @@ Supported URL formats:
 
 You can also add repositories in Settings under `AIToolsOrganizer.skillRepositories`. For Azure DevOps repositories, set the `project` field in addition to `owner`, `repo`, and `branch`.
 
+## How repository scanning works
+
+To avoid loading the entire file tree of large repositories, the extension uses a scoped two-phase approach:
+
+1. **Root listing** — one non-recursive API call retrieves the top-level entries.
+2. **Targeted subtree fetches** — only directories that match a known allowlist are recursively fetched. The allowlist includes:
+   - Dot-tooling roots: `.cursor`, `.claude`, `.cursor-plugin`
+   - Conventional area directory names: `skills`, `agents`, `hooks`, `rules`, `instructions`, `plugins`, `prompts`
+3. **Marketplace augmentation** — if `.cursor-plugin/marketplace.json` is present, each declared plugin directory is also fetched.
+
+Directories such as `.github`, `node_modules`, `docs`, or any other unrecognised folder are **never** recursed into. This keeps loading fast even for large monorepos where only a small subset of the tree contains AI tools.
+
 ## Searching
 
 Use the search icon in any view's toolbar to filter items by name or description. The clear button (✕) resets the filter.

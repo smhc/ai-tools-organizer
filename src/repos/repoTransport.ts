@@ -5,7 +5,7 @@
  *   - GitHubRepoTransport  (src/repos/githubRepoTransport.ts)
  *   - AzureDevOpsRepoTransport (src/repos/azureDevOpsRepoTransport.ts)
  *
- * The higher-level RemoteSkillsClient (src/github/skillsClient.ts) uses this
+ * The higher-level GitHubSkillsClient (src/github/skillsClient.ts) uses this
  * interface so discovery and parsing logic is shared across both providers.
  */
 
@@ -23,11 +23,19 @@ export interface RepoTreeItem {
 
 export interface RepoTransport {
     /**
-     * Fetch the full recursive tree for a repository/branch.
-     * Implementors must normalise paths to have no leading slash and
-     * use forward slashes as separators.
+     * Fetch only the immediate (non-recursive) entries at the repository root.
+     * Returns one RepoTreeItem per file or directory at the root level.
+     * Implementors must normalise paths to have no leading slash.
      */
-    fetchRepoTree(repo: SkillRepository): Promise<RepoTreeItem[]>;
+    fetchRootTreeEntries(repo: SkillRepository): Promise<RepoTreeItem[]>;
+
+    /**
+     * Recursively fetch all descendants of a single top-level directory.
+     * `prefixPath` is a root-level directory name (no leading/trailing slash).
+     * Returned paths are full repo-relative paths (e.g. "skills/my-skill/SKILL.md").
+     * Implementors must normalise paths to have no leading slash and use forward slashes.
+     */
+    fetchSubtreeRecursive(repo: SkillRepository, prefixPath: string): Promise<RepoTreeItem[]>;
 
     /**
      * Fetch the raw text content of a single file.

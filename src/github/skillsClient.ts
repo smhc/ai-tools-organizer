@@ -6,6 +6,21 @@
  *   - AzureDevOpsRepoTransport — ADO Git Items API
  *
  * Discovery and YAML/JSON parsing are shared regardless of hosting provider.
+ *
+ * Tree fetching strategy
+ * ──────────────────────
+ * Rather than pulling a full recursive tree for the entire repository, the client
+ * performs scoped fetching:
+ *
+ *   1. Fetch only the root-level entries (one API call, non-recursive).
+ *   2. Intersect those root entries against an allowlist of "interesting" top-level
+ *      directories: dot-tooling roots (.cursor, .claude, .cursor-plugin) plus the
+ *      conventional directory name for every recognised content area (skills, agents, …).
+ *      .github is explicitly excluded.
+ *   3. For each matching root directory, fetch its subtree recursively (one API call each).
+ *   4. If a .cursor-plugin/marketplace.json exists, parse it and also fetch the subtree
+ *      of each declared plugin directory.
+ *   5. Merge and deduplicate all subtree results for downstream discovery and content logic.
  */
 
 import * as vscode from 'vscode';
@@ -13,6 +28,27 @@ import { Skill, SkillRepository, SkillMetadata, CacheEntry, FailedRepository, re
 import { RepoTransport, RepoTreeItem } from '../repos/repoTransport';
 import { GitHubRepoTransport } from '../repos/githubRepoTransport';
 import { AzureDevOpsRepoTransport } from '../repos/azureDevOpsRepoTransport';
+
+/**
+ * Fixed dot-tooling root directories that are always included in the interesting-prefix
+ * allowlist when they appear at the repo root. .github is intentionally absent.
+ */
+const DOT_TOOL_DIRS: ReadonlySet<string> = new Set(['.cursor', '.claude', '.cursor-plugin']);
+
+/**
+ * Derive the set of conventional top-level directory names from AREA_DEFINITIONS.
+ * Used as additional candidates beyond the dot-tooling roots.
+ */
+function buildConventionalDirs(): ReadonlySet<string> {
+    const dirs = new Set<string>();
+    for (const area of ALL_CONTENT_AREAS) {
+        const def = AREA_DEFINITIONS[area];
+        dirs.add(def.conventionalDir || area);
+    }
+    return dirs;
+}
+
+const CONVENTIONAL_DIRS: ReadonlySet<string> = buildConventionalDirs();
 
 export class GitHubSkillsClient {
     private cache: Map<string, CacheEntry<unknown>> = new Map();
@@ -30,10 +66,10 @@ export class GitHubSkillsClient {
     }
 
     /**
-     * Fetch all skills from configured repositories
-     * 
-     * API calls: 1 per repository (using Git Trees API)
-     * File content: Fetched via raw.githubusercontent.com (no API limit)
+     * Fetch all skills from configured repositories.
+     *
+     * API calls per repo: 1 root listing + 1 per interesting subtree
+     * File content: fetched individually on demand (no rate-limit cost on GitHub)
      */
     async fetchAllSkills(): Promise<{ skills: Skill[]; failures: FailedRepository[] }> {
         const repositories = readRepositoriesConfig();
@@ -70,10 +106,114 @@ export class GitHubSkillsClient {
     }
 
     /**
-     * Fetch the full recursive tree for a repository via the appropriate transport.
+     * Build the merged tree of all interesting subtrees for a repository.
+     *
+     * Steps:
+     *  1. Fetch root entries (one non-recursive API call).
+     *  2. Intersect root directory names against the allowlist (dot-tool dirs + conventional dirs,
+     *     excluding .github).
+     *  3. Check if .cursor-plugin/marketplace.json is reachable; if so, parse it and add each
+     *     declared plugin directory to the prefix set.
+     *  4. Fetch each interesting subtree recursively (one API call per prefix).
+     *  5. Merge results, deduplicating by path (first writer wins).
      */
-    private async fetchRepoTree(repo: SkillRepository): Promise<RepoTreeItem[]> {
-        return this.transport(repo).fetchRepoTree(repo);
+    private async fetchMergedInterestingTree(repo: SkillRepository): Promise<RepoTreeItem[]> {
+        const transport = this.transport(repo);
+
+        // Step 1: non-recursive root listing
+        const rootEntries = await transport.fetchRootTreeEntries(repo);
+
+        // Step 2: build the set of interesting prefixes from root dirs
+        const prefixSet = new Set<string>();
+        for (const entry of rootEntries) {
+            if (entry.type !== 'tree') { continue; }
+            const name = entry.path;
+            if (DOT_TOOL_DIRS.has(name) || CONVENTIONAL_DIRS.has(name)) {
+                prefixSet.add(name);
+            }
+        }
+
+        // Step 3: marketplace augmentation — probe .cursor-plugin/marketplace.json
+        // and collect plugin directories declared there.
+        const marketplacePluginDirs = await this.collectMarketplacePluginDirs(repo);
+        for (const dir of marketplacePluginDirs) {
+            if (!dir.includes('..')) {
+                prefixSet.add(dir.split('/')[0]); // add the top-level segment
+            }
+        }
+
+        // Step 4: fetch each interesting subtree
+        const merged = new Map<string, RepoTreeItem>();
+
+        // Include root-level blobs (e.g. a marketplace.json at .cursor-plugin/ root)
+        for (const entry of rootEntries) {
+            if (!merged.has(entry.path)) {
+                merged.set(entry.path, entry);
+            }
+        }
+
+        await Promise.all(
+            [...prefixSet].map(async (prefix) => {
+                try {
+                    const items = await transport.fetchSubtreeRecursive(repo, prefix);
+                    for (const item of items) {
+                        if (!merged.has(item.path)) {
+                            merged.set(item.path, item);
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`Failed to fetch subtree "${prefix}" in ${repo.owner}/${repo.repo}:`, err);
+                }
+            })
+        );
+
+        return [...merged.values()];
+    }
+
+    /**
+     * Attempt to read .cursor-plugin/marketplace.json and return the list of plugin
+     * directory paths declared in it (applying pluginRoot if present).
+     * Returns an empty array when the file does not exist or is invalid.
+     */
+    private async collectMarketplacePluginDirs(repo: SkillRepository): Promise<string[]> {
+        let raw: string;
+        try {
+            raw = await this.transport(repo).fetchFileText(repo, '.cursor-plugin/marketplace.json');
+        } catch {
+            return [];
+        }
+
+        let manifest: unknown;
+        try {
+            manifest = JSON.parse(raw);
+        } catch {
+            return [];
+        }
+
+        if (!manifest || typeof manifest !== 'object') { return []; }
+        const m = manifest as Record<string, unknown>;
+        const pluginsArray = m['plugins'];
+        if (!Array.isArray(pluginsArray)) { return []; }
+
+        const pluginRoot = (m['metadata'] as Record<string, unknown> | undefined)?.['pluginRoot'];
+        const globalPrefix = typeof pluginRoot === 'string' && pluginRoot
+            ? pluginRoot.replace(/\/+$/, '')
+            : '';
+
+        const dirs: string[] = [];
+        for (const entry of pluginsArray) {
+            if (!entry || typeof entry !== 'object') { continue; }
+            const e = entry as Record<string, unknown>;
+            const rawSource = typeof e['source'] === 'string'
+                ? e['source']
+                : (e['source'] && typeof e['source'] === 'object' && typeof (e['source'] as Record<string, unknown>)['path'] === 'string'
+                    ? (e['source'] as Record<string, unknown>)['path'] as string
+                    : '');
+            if (!rawSource || rawSource.includes('..')) { continue; }
+            const pluginDir = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
+            dirs.push(pluginDir);
+        }
+        return dirs;
     }
 
     /**
@@ -164,13 +304,25 @@ export class GitHubSkillsClient {
 
     /**
      * Fetch all files in a skill directory for installation.
+     * Uses a scoped subtree fetch under skill.skillPath rather than a full repo tree.
      */
     async fetchSkillFiles(skill: Skill): Promise<{ path: string; content: string }[]> {
-        // Get tree (likely cached from earlier fetch)
-        const tree = await this.fetchRepoTree(skill.source);
+        const transport = this.transport(skill.source);
 
-        // Find all files under this skill's path
-        const skillFiles = tree.filter(item =>
+        // Determine the top-level prefix from the skill path (first path segment)
+        const topLevelPrefix = skill.skillPath.split('/')[0];
+        let subtreeItems: RepoTreeItem[];
+
+        // For items rooted at the very top of the repo (no subdirectory), fall back to
+        // the merged tree so we can still enumerate files.
+        if (!topLevelPrefix || topLevelPrefix === skill.skillPath) {
+            subtreeItems = await this.fetchMergedInterestingTree(skill.source);
+        } else {
+            subtreeItems = await transport.fetchSubtreeRecursive(skill.source, topLevelPrefix);
+        }
+
+        // Filter to files under this skill's path
+        const skillFiles = subtreeItems.filter(item =>
             item.type === 'blob' &&
             item.path.startsWith(skill.skillPath + '/')
         );
@@ -194,7 +346,6 @@ export class GitHubSkillsClient {
         const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
         
         if (!frontmatterMatch) {
-            // Try to extract basic info even without frontmatter
             return {
                 metadata: { name: '', description: '' },
                 body: content
@@ -221,11 +372,9 @@ export class GitHubSkillsClient {
         
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            // Check for key: value pattern
             const keyMatch = line.match(/^(\w+(?:-\w+)*):\s*(.*)$/);
             
             if (keyMatch) {
-                // Save previous multiline value if any
                 if (currentKey && multilineValue) {
                     this.setMetadataValue(metadata, currentKey, multilineValue.trim());
                 }
@@ -233,7 +382,6 @@ export class GitHubSkillsClient {
                 currentKey = keyMatch[1];
                 const value = keyMatch[2].trim();
                 
-                // Detect YAML block scalar indicators (>, |, >-, |-, >+, |+, >2, etc.)
                 if (isYamlBlockScalar(value)) {
                     const collected = collectBlockScalarValue(lines, i, value);
                     this.setMetadataValue(metadata, currentKey, collected);
@@ -251,7 +399,6 @@ export class GitHubSkillsClient {
             }
         }
         
-        // Handle last multiline value
         if (currentKey && multilineValue) {
             this.setMetadataValue(metadata, currentKey, multilineValue.trim());
         }
@@ -279,43 +426,38 @@ export class GitHubSkillsClient {
         }
     }
 
-
     /**
-     * Discover which content areas exist in a repository by scanning the tree.
+     * Discover which content areas exist in a repository by scanning the scoped tree.
      * Returns an AreaPaths mapping each found area to its path.
-     * API calls: 1 (tree fetch — reuses cached result for subsequent calls)
+     *
+     * API calls: 1 root + 1 per interesting subtree (results cached per session)
      */
     async discoverAreas(repo: SkillRepository): Promise<AreaPaths> {
-        const tree = await this.fetchRepoTree(repo);
+        const tree = await this.fetchMergedInterestingTree(repo);
         const result: AreaPaths = {};
 
-        // Step 1: Check for top-level directories matching area names
-        // This is the strongest signal — a folder named "skills", "agents", etc.
+        // Step 1: Check for top-level directories matching conventional area names.
+        // These appear in the merged tree because they were selected as interesting prefixes.
         const topLevelDirs = new Set(
             tree
                 .filter(item => item.type === 'tree' && !item.path.includes('/'))
                 .map(item => item.path)
         );
 
-        // Map of conventional folder names to areas
-        // Areas with conventionalDir override use that; others use the area key itself
         for (const area of ALL_CONTENT_AREAS) {
             const def = AREA_DEFINITIONS[area];
             const dirName = def.conventionalDir || area;
             if (!topLevelDirs.has(dirName)) { continue; }
 
-            // If hooksGithub was already found for this dir, skip hooksKiro (they're mutually exclusive)
+            // hooksGithub and hooksKiro share the same directory — only one wins
             if (area === 'hooksKiro' && result['hooksGithub'] !== undefined) { continue; }
 
-            // Verify the directory actually contains matching content
             if (def.kind === 'multiFile' && def.definitionFile) {
-                // Check primary definition file
                 let hasContent = tree.some(item =>
                     item.type === 'blob' &&
                     item.path.startsWith(dirName + '/') &&
                     item.path.endsWith(`/${def.definitionFile}`)
                 );
-                // Also check alternate definition files (e.g. .cursor-plugin/plugin.json)
                 if (!hasContent) {
                     hasContent = (def.alternateDefinitionFiles ?? []).some(alt =>
                         tree.some(item =>
@@ -337,20 +479,19 @@ export class GitHubSkillsClient {
             }
         }
 
-        // Step 2: For areas not found via conventional names, search the full tree
-        // but exclude files under already-discovered area paths
+        // Step 2: For areas not yet found, search the merged subtree paths.
+        // Conventional-only areas are skipped (hooksGithub / hooksKiro).
         const discoveredPrefixes = Object.values(result)
             .filter(p => p !== undefined && p !== '')
             .map(p => p + '/');
 
         for (const area of ALL_CONTENT_AREAS) {
-            if (result[area] !== undefined) { continue; } // Already found
+            if (result[area] !== undefined) { continue; }
 
             const def = AREA_DEFINITIONS[area];
-            if (def.conventionalOnly) { continue; } // Only discoverable via conventional top-level dir name
+            if (def.conventionalOnly) { continue; }
 
             if (def.kind === 'multiFile' && def.definitionFile) {
-                // Collect all definition file candidates (primary + alternates)
                 const defFileSuffixes = [def.definitionFile, ...(def.alternateDefinitionFiles ?? [])];
                 const defFiles = tree.filter(item =>
                     item.type === 'blob' &&
@@ -399,17 +540,15 @@ export class GitHubSkillsClient {
             }
         }
 
-        // Step 3: Check for a Cursor marketplace manifest (.cursor-plugin/marketplace.json).
-        // This handles multi-plugin repos that list plugins explicitly.
-        // Conventional plugins/ layout (Steps 1/2) takes precedence; marketplace is only used
-        // when those steps did not find a plugins area.
+        // Step 3: Check for a Cursor marketplace manifest.
+        // The manifest presence is signalled by the file appearing in the merged tree
+        // (because .cursor-plugin is an interesting prefix) or by the earlier manifest probe
+        // in fetchMergedInterestingTree.
         if (result['plugins'] === undefined) {
             const hasMarketplace = tree.some(
                 item => item.type === 'blob' && item.path === '.cursor-plugin/marketplace.json'
             );
             if (hasMarketplace) {
-                // Signal that this repo uses the Cursor marketplace format;
-                // actual per-plugin expansion happens in fetchRepoContent.
                 result['plugins'] = '.cursor-plugin/marketplace';
             }
         }
@@ -429,9 +568,7 @@ export class GitHubSkillsClient {
      */
     private resolvePluginRootFromDefPath(blobPath: string): string {
         const segments = blobPath.split('/');
-        // Remove the filename
         segments.pop();
-        // Remove trailing wrapper segments
         while (segments.length > 0) {
             const last = segments[segments.length - 1];
             if (last.startsWith('.') || last === 'plugin' || last === 'hooks') {
@@ -446,17 +583,19 @@ export class GitHubSkillsClient {
     /**
      * Fetch all content from a repository across all discovered areas.
      * Returns skills (multi-file items) and fileItems (single-file items).
-     * API calls: 1 for tree + N raw content fetches (no rate limit)
+     *
+     * API calls: scoped subtrees already fetched and cached by discoverAreas;
+     * additional per-file fetches for definition files (no API rate-limit cost on GitHub).
      */
     async fetchRepoContent(repo: SkillRepository, areaPaths: AreaPaths): Promise<RepoContent> {
-        const tree = await this.fetchRepoTree(repo);
+        const tree = await this.fetchMergedInterestingTree(repo);
         const paths = areaPaths;
 
         const skills: Skill[] = [];
         const fileItems: AreaFileItem[] = [];
 
-        // Build exclusion prefixes: all configured area paths except the current one
-        // This prevents e.g. a .prompt.md inside a plugin folder from appearing under Prompts
+        // Build exclusion prefixes: all configured area paths except the current one.
+        // Prevents e.g. a .prompt.md inside a plugin folder from appearing under Prompts.
         const allAreaPrefixes = new Map<ContentArea, string>();
         for (const a of ALL_CONTENT_AREAS) {
             const p = paths[a];
@@ -465,21 +604,18 @@ export class GitHubSkillsClient {
             }
         }
 
-        // Process each area that has a path configured
         for (const area of ALL_CONTENT_AREAS) {
             const areaPath = paths[area];
             if (areaPath === undefined) { continue; }
 
             const def = AREA_DEFINITIONS[area];
 
-            // Exclusion prefixes: other area paths that differ from this area's path
             const currentPrefix = areaPath ? areaPath + '/' : '';
             const otherPrefixes = [...allAreaPrefixes.entries()]
                 .filter(([a, prefix]) => a !== area && prefix !== currentPrefix)
                 .map(([, prefix]) => prefix);
 
             if (def.kind === 'multiFile' && def.definitionFile) {
-                // Handle Cursor marketplace path — expand from .cursor-plugin/marketplace.json
                 if (areaPath === '.cursor-plugin/marketplace') {
                     const marketplaceSkills = await this.fetchCursorMarketplacePlugins(repo, tree, otherPrefixes);
                     skills.push(...marketplaceSkills);
@@ -487,7 +623,6 @@ export class GitHubSkillsClient {
                 }
 
                 const prefix = areaPath ? areaPath + '/' : '';
-                // Match both primary and alternate definition file suffixes
                 const defCandidates = [def.definitionFile, ...(def.alternateDefinitionFiles ?? [])];
                 const defFiles = tree.filter(item =>
                     item.type === 'blob' &&
@@ -496,9 +631,6 @@ export class GitHubSkillsClient {
                     !otherPrefixes.some(op => item.path.startsWith(op))
                 );
 
-                // Deduplicate: find the item root folder for each definition file.
-                // The item root is determined by removing the definition file and any
-                // known wrapper directories (e.g. .claude-plugin/, .cursor-plugin/, .github/plugin/).
                 const seenItems = new Map<string, string>(); // itemDir → first defFile path
                 for (const item of defFiles) {
                     const itemRoot = this.resolvePluginRootFromDefPath(item.path);
@@ -511,14 +643,11 @@ export class GitHubSkillsClient {
                 const items = await Promise.all(
                     [...seenItems.entries()].map(async ([itemDir, defFilePath]) => {
                         const skillName = itemDir.split('/').pop() || itemDir;
-                        // Use the actual definition file path's parent for metadata fetching
                         const defParentDir = defFilePath.substring(0, defFilePath.lastIndexOf('/'));
                         try {
                             const skill = await this.fetchSkillMetadataRaw(repo, skillName, defParentDir, area);
-                            // Override skillPath to point to the item's root folder (not the nested def file location)
                             if (skill) {
                                 skill.skillPath = itemDir;
-                                // If README wasn't found at the def file location, try the item root
                                 if (!skill.bodyContent && defParentDir !== itemDir) {
                                     try {
                                         const readmePath = `${itemDir}/README.md`;
@@ -552,7 +681,6 @@ export class GitHubSkillsClient {
                     !otherPrefixes.some(op => item.path.startsWith(op))
                 );
 
-                // Deduplicate by display name (prefer more-specific suffix, already ordered in fileSuffixes)
                 const seenNames = new Set<string>();
                 for (const item of matchingFiles) {
                     const fileName = item.path.split('/').pop() || item.path;
@@ -582,11 +710,16 @@ export class GitHubSkillsClient {
     /**
      * Expand a Cursor marketplace manifest (.cursor-plugin/marketplace.json) into Skill entries.
      * Each entry in the manifest's `plugins` array becomes one plugin Skill.
-     * Per-plugin .cursor-plugin/plugin.json manifests are merged in (marketplace entry wins on
+     * Per-plugin .cursor-plugin/plugin.json manifests are merged in (per-plugin wins on
      * name/description if provided).
      *
+     * The manifest has already been fetched during tree building; treeItems is used to
+     * verify plugin manifest existence. If a manifest is listed in marketplace.json but
+     * its .cursor-plugin/plugin.json is absent from the tree, the fetch is attempted anyway
+     * and skipped only on failure—this avoids requiring a full tree for verification.
+     *
      * @param repo Source repository
-     * @param treeItems Full tree blob list (used to verify plugin manifests exist)
+     * @param treeItems Merged interesting tree (used for existence hints and exclusion checks)
      * @param otherPrefixes Prefixes already claimed by other areas (exclusion list)
      */
     private async fetchCursorMarketplacePlugins(
@@ -607,7 +740,6 @@ export class GitHubSkillsClient {
         const pluginsArray = manifest['plugins'];
         if (!Array.isArray(pluginsArray)) { return []; }
 
-        // Optional global prefix for all plugin source paths
         const pluginRoot = (manifest['metadata'] as Record<string, unknown> | undefined)?.['pluginRoot'];
         const globalPrefix = typeof pluginRoot === 'string' && pluginRoot ? pluginRoot.replace(/\/+$/, '') : '';
 
@@ -620,7 +752,6 @@ export class GitHubSkillsClient {
             const entryName = typeof e['name'] === 'string' ? e['name'] : '';
             const entryDesc = typeof e['description'] === 'string' ? e['description'] : '';
 
-            // Resolve source path
             const rawSource = typeof e['source'] === 'string'
                 ? e['source']
                 : (e['source'] && typeof e['source'] === 'object' && typeof (e['source'] as Record<string, unknown>)['path'] === 'string'
@@ -629,28 +760,31 @@ export class GitHubSkillsClient {
             if (!rawSource || rawSource.includes('..')) { continue; }
             const pluginDir = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
 
-            // Reject paths outside the repo or already claimed by another area
             if (otherPrefixes.some(p => pluginDir.startsWith(p))) { continue; }
 
-            // Verify the plugin has a manifest in the tree
             const manifestPath = `${pluginDir}/.cursor-plugin/plugin.json`;
-            const hasManifest = treeItems.some(i => i.type === 'blob' && i.path === manifestPath);
-            if (!hasManifest) { continue; }
 
-            // Fetch per-plugin manifest and merge (per-plugin wins on name/description)
+            // Prefer the tree hint for a fast existence check; fall back to attempting
+            // the fetch so we don't require the plugin directory to be in the interesting
+            // subtrees already fetched.
+            const inTree = treeItems.some(i => i.type === 'blob' && i.path === manifestPath);
+
             let name = entryName || pluginDir.split('/').pop() || pluginDir;
             let description = entryDesc;
             let bodyContent: string | undefined;
             let fullContent: string | undefined;
+
             try {
                 const perPluginRaw = await this.fetchRawContent(repo, manifestPath);
                 const perPlugin = JSON.parse(perPluginRaw) as Record<string, unknown>;
                 if (typeof perPlugin['name'] === 'string' && perPlugin['name']) { name = perPlugin['name']; }
                 if (typeof perPlugin['description'] === 'string' && perPlugin['description']) { description = perPlugin['description']; }
                 fullContent = perPluginRaw;
-            } catch { /* missing or invalid per-plugin manifest */ }
+            } catch {
+                // If not found in tree and fetch failed, skip this plugin
+                if (!inTree) { continue; }
+            }
 
-            // Try README.md at the plugin root for body content
             try {
                 const readmeRaw = await this.fetchRawContent(repo, `${pluginDir}/README.md`);
                 const parsed = this.parseSkillMd(readmeRaw);

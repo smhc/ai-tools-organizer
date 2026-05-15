@@ -1,7 +1,9 @@
 /**
  * Azure DevOps implementation of RepoTransport.
  *
- * Tree listing : Git Items API with recursionLevel=Full (1 call per repo/branch).
+ * Tree listing:
+ *   - fetchRootTreeEntries: Items API with recursionLevel=OneLevel, scopePath=/.
+ *   - fetchSubtreeRecursive: Items API with recursionLevel=Full, scopePath=/{prefix}.
  * File content : Git Items API with download=true.
  * Default branch: Git Repositories API (strips "refs/heads/" prefix).
  *
@@ -29,21 +31,23 @@ interface AdoRepoInfo {
 }
 
 const ADO_API_VERSION = '7.1';
-const LARGE_TREE_THRESHOLD = 5000;
 
 export class AzureDevOpsRepoTransport implements RepoTransport {
     constructor(private readonly cache: Map<string, CacheEntry<unknown>>) {}
 
-    async fetchRepoTree(repo: SkillRepository): Promise<RepoTreeItem[]> {
+    /**
+     * Fetch only the immediate children of the repository root (one level deep).
+     */
+    async fetchRootTreeEntries(repo: SkillRepository): Promise<RepoTreeItem[]> {
         const branch = repo.branch || 'main';
-        const cacheKey = `ado:tree:${repo.owner}/${repo.project}/${repo.repo}@${branch}`;
+        const cacheKey = `ado:root:${repo.owner}/${repo.project}/${repo.repo}@${branch}`;
         const cached = this.getFromCache<AdoItemEntry[]>(cacheKey);
-        if (cached) { return this.normalizeItems(cached); }
+        if (cached) { return this.normalizeItems(cached, ''); }
 
         const base = this.baseUrl(repo);
         const params = new URLSearchParams({
             'scopePath': '/',
-            'recursionLevel': 'Full',
+            'recursionLevel': 'OneLevel',
             'versionDescriptor.version': branch,
             'versionDescriptor.versionType': 'branch',
             'api-version': ADO_API_VERSION,
@@ -66,27 +70,61 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
         }
 
         const data = await response.json() as AdoItemsResponse;
+        this.setCache(cacheKey, data.value);
+        return this.normalizeItems(data.value, '');
+    }
 
-        if (data.count >= LARGE_TREE_THRESHOLD) {
-            console.warn(
-                `ADO tree for ${repo.owner}/${repo.project}/${repo.repo} has ${data.count} items. ` +
-                'Some content may be slow to load.'
-            );
+    /**
+     * Recursively fetch all items under `prefixPath`.
+     */
+    async fetchSubtreeRecursive(repo: SkillRepository, prefixPath: string): Promise<RepoTreeItem[]> {
+        const branch = repo.branch || 'main';
+        const cacheKey = `ado:subtree:${repo.owner}/${repo.project}/${repo.repo}/${prefixPath}@${branch}`;
+        const cached = this.getFromCache<AdoItemEntry[]>(cacheKey);
+        if (cached) { return this.normalizeItems(cached, prefixPath); }
+
+        const base = this.baseUrl(repo);
+        const scopePath = prefixPath.startsWith('/') ? prefixPath : `/${prefixPath}`;
+        const params = new URLSearchParams({
+            'scopePath': scopePath,
+            'recursionLevel': 'Full',
+            'versionDescriptor.version': branch,
+            'versionDescriptor.versionType': 'branch',
+            'api-version': ADO_API_VERSION,
+        });
+        const url = `${base}/_apis/git/repositories/${encodeURIComponent(repo.repo)}/items?${params}`;
+
+        const response = await this.fetchWithAuth(url);
+
+        if (!response.ok) {
+            if (response.status === 404) {
+                // Subtree doesn't exist — not an error, return empty
+                return [];
+            }
+            if (response.status === 401 || response.status === 403) {
+                vscode.window.showErrorMessage(
+                    `Azure DevOps authentication failed (${response.status}). ` +
+                    'Check AIToolsOrganizer.azureDevOpsPat or the AZURE_DEVOPS_EXT_PAT environment variable.'
+                );
+            }
+            throw new Error(`Azure DevOps API error fetching subtree ${prefixPath}: ${response.status} ${response.statusText}`);
         }
 
+        const data = await response.json() as AdoItemsResponse;
         this.setCache(cacheKey, data.value);
-        return this.normalizeItems(data.value);
+        return this.normalizeItems(data.value, prefixPath);
     }
 
     /**
      * Normalise ADO item entries to the common RepoTreeItem shape:
      * - Strip the mandatory leading `/` from ADO paths.
      * - Map isFolder to type.
-     * - Skip the root entry (path === '/') produced by scopePath=/.
+     * - Skip the root/scope entry itself (path matches scopePath exactly).
      */
-    private normalizeItems(items: AdoItemEntry[]): RepoTreeItem[] {
+    private normalizeItems(items: AdoItemEntry[], scopePrefix: string): RepoTreeItem[] {
+        const skipPath = scopePrefix ? `/${scopePrefix}` : '/';
         return items
-            .filter(item => item.path !== '/')
+            .filter(item => item.path !== '/' && item.path !== skipPath)
             .map(item => ({
                 path: item.path.startsWith('/') ? item.path.slice(1) : item.path,
                 type: item.isFolder ? 'tree' as const : 'blob' as const,

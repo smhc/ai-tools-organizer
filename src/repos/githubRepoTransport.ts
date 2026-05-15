@@ -1,7 +1,10 @@
 /**
  * GitHub implementation of RepoTransport.
  *
- * Tree listing: GitHub Git Trees API (1 call per repo/branch).
+ * Tree listing:
+ *   - fetchRootTreeEntries: one non-recursive GET of the branch root tree.
+ *   - fetchSubtreeRecursive: resolves the subtree SHA from the root response,
+ *     then issues a single recursive GET against that SHA.
  * File content: raw.githubusercontent.com (no API rate-limit cost).
  * Default branch: GitHub Repositories API.
  */
@@ -29,15 +32,71 @@ export class GitHubRepoTransport implements RepoTransport {
 
     constructor(private readonly cache: Map<string, CacheEntry<unknown>>) {}
 
-    async fetchRepoTree(repo: SkillRepository): Promise<RepoTreeItem[]> {
+    /**
+     * Fetch the non-recursive root tree for a branch.
+     * Result is cached; sha-keyed subtree fetches re-use the sha recorded here.
+     */
+    async fetchRootTreeEntries(repo: SkillRepository): Promise<RepoTreeItem[]> {
+        const rootResponse = await this.fetchRootTree(repo);
+        return rootResponse.tree.map(item => ({
+            path: item.path,
+            type: item.type as 'blob' | 'tree',
+        }));
+    }
+
+    /**
+     * Recursively fetch all items under `prefixPath` by resolving its tree SHA
+     * from the root tree, then requesting that subtree with recursive=1.
+     */
+    async fetchSubtreeRecursive(repo: SkillRepository, prefixPath: string): Promise<RepoTreeItem[]> {
         const branch = repo.branch || 'main';
-        const cacheKey = `gh:tree:${repo.owner}/${repo.repo}@${branch}`;
-        const cached = this.getFromCache<GhTreeResponse>(cacheKey);
-        if (cached) {
-            return this.normalizeTree(cached, repo.owner, repo.repo, branch);
+        const rootResponse = await this.fetchRootTree(repo);
+
+        // Find the tree entry for this prefix at the root level
+        const subtreeEntry = rootResponse.tree.find(
+            item => item.type === 'tree' && item.path === prefixPath
+        );
+        if (!subtreeEntry) {
+            return [];
         }
 
-        const url = `${GitHubRepoTransport.BASE_URL}/repos/${repo.owner}/${repo.repo}/git/trees/${branch}?recursive=1`;
+        const sha = subtreeEntry.sha;
+        const cacheKey = `gh:subtree:${repo.owner}/${repo.repo}@${sha}`;
+        const cached = this.getFromCache<GhTreeItem[]>(cacheKey);
+        if (cached) {
+            return this.normalizeSubtreeItems(cached, prefixPath);
+        }
+
+        const url = `${GitHubRepoTransport.BASE_URL}/repos/${repo.owner}/${repo.repo}/git/trees/${sha}?recursive=1`;
+        const response = await this.fetchWithAuth(url);
+
+        if (!response.ok) {
+            throw new Error(`GitHub API error fetching subtree ${prefixPath}: ${response.status} ${response.statusText}`);
+        }
+
+        this.checkRateLimit(response);
+
+        const data = await response.json() as GhTreeResponse;
+
+        if (data.truncated) {
+            console.warn(`Subtree ${prefixPath} in ${repo.owner}/${repo.repo} was truncated. Some content may be missing.`);
+        }
+
+        this.setCache(cacheKey, data.tree);
+        return this.normalizeSubtreeItems(data.tree, prefixPath);
+    }
+
+    /**
+     * Fetch (and cache) the non-recursive root tree response.
+     * The root tree SHA entries are used both for root listing and to resolve subtree SHAs.
+     */
+    private async fetchRootTree(repo: SkillRepository): Promise<GhTreeResponse> {
+        const branch = repo.branch || 'main';
+        const cacheKey = `gh:root:${repo.owner}/${repo.repo}@${branch}`;
+        const cached = this.getFromCache<GhTreeResponse>(cacheKey);
+        if (cached) { return cached; }
+
+        const url = `${GitHubRepoTransport.BASE_URL}/repos/${repo.owner}/${repo.repo}/git/trees/${branch}`;
         const response = await this.fetchWithAuth(url);
 
         if (!response.ok) {
@@ -50,19 +109,15 @@ export class GitHubRepoTransport implements RepoTransport {
         this.checkRateLimit(response);
 
         const data = await response.json() as GhTreeResponse;
-
-        if (data.truncated) {
-            console.warn(`Tree for ${repo.owner}/${repo.repo} was truncated. Some content may be missing.`);
-        }
-
         this.setCache(cacheKey, data);
-        return this.normalizeTree(data, repo.owner, repo.repo, branch);
+        return data;
     }
 
-    private normalizeTree(data: GhTreeResponse, _owner: string, _repo: string, _branch: string): RepoTreeItem[] {
-        return data.tree.map(item => ({
-            path: item.path,
-            type: item.type,
+    /** Prepend `prefix/` to each item path so callers get full repo-relative paths. */
+    private normalizeSubtreeItems(items: GhTreeItem[], prefix: string): RepoTreeItem[] {
+        return items.map(item => ({
+            path: `${prefix}/${item.path}`,
+            type: item.type as 'blob' | 'tree',
         }));
     }
 
