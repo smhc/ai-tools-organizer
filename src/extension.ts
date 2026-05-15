@@ -11,7 +11,7 @@ import { InstalledAreaTreeDataProvider, AreaInstalledItemTreeItem, AreaLocationT
 import { SkillDetailPanel } from './views/skillDetailPanel';
 import { SkillInstallationService } from './services/installationService';
 import { SkillPathService } from './services/skillPathService';
-import { Skill, InstalledSkill, SkillRepository, isSameRepository, normalizeSeparators, buildGitHubUrl, buildRepoWebUrl, formatRepoLabel, readRepositoriesConfig, writeRepositoriesConfig, AreaFileItem, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea } from './types';
+import { Skill, InstalledSkill, SkillRepository, isSameRepository, normalizeSeparators, buildRepoWebUrl, formatRepoLabel, readRepositoriesConfig, writeRepositoriesConfig, AreaFileItem, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea } from './types';
 import { PLUGIN_SUBFOLDER_TO_AREA, PLUGIN_AREA_SUBFOLDERS, AREA_TO_PLUGIN_SUBFOLDER, resolveInstalledItemUri, syncPluginItem } from './services/pluginSyncService';
 
 /**

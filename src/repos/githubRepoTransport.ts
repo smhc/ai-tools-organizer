@@ -49,7 +49,6 @@ export class GitHubRepoTransport implements RepoTransport {
      * from the root tree, then requesting that subtree with recursive=1.
      */
     async fetchSubtreeRecursive(repo: SkillRepository, prefixPath: string): Promise<RepoTreeItem[]> {
-        const branch = repo.branch || 'main';
         const rootResponse = await this.fetchRootTree(repo);
 
         // Find the tree entry for this prefix at the root level
