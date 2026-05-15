@@ -187,6 +187,7 @@ export function parseGitHubUrl(input: string): { owner: string; repo: string; br
  * Handles:
  *   https://dev.azure.com/{org}/{project}/_git/{repo}
  *   https://{user}@dev.azure.com/{org}/{project}/_git/{repo}
+ *   {org}.visualstudio.com/{project}/_git/{repo} (with or without https://)
  *   The above with an optional `version=GB{branch}` query parameter.
  *
  * Returns undefined when the input cannot be parsed as an ADO Git URL.
@@ -194,9 +195,18 @@ export function parseGitHubUrl(input: string): { owner: string; repo: string; br
  */
 export function parseAzureDevOpsGitUrl(input: string): { owner: string; project: string; repo: string; branch: string | undefined } | undefined {
     const trimmed = input.trim();
+    if (!trimmed) {
+        return undefined;
+    }
 
-    // Strip credentials prefix (e.g. "user@") from the host
-    const withoutCreds = trimmed.replace(/^(https?:\/\/)[^@]+@/, '$1');
+    // new URL() requires a scheme; Git-style copy/paste often omits https://
+    let withScheme = trimmed;
+    if (!/^https?:\/\//i.test(withScheme)) {
+        withScheme = `https://${withScheme.replace(/^\/+/, '')}`;
+    }
+
+    // Strip userinfo (e.g. org name or PAT prefix before @dev.azure.com)
+    const withoutCreds = withScheme.replace(/^(https?:\/\/)[^@/]+@/i, '$1');
 
     let url: URL;
     try {
@@ -205,23 +215,49 @@ export function parseAzureDevOpsGitUrl(input: string): { owner: string; project:
         return undefined;
     }
 
-    if (url.hostname !== 'dev.azure.com') {
+    const host = url.hostname.toLowerCase();
+
+    const pathParts = url.pathname.split('/').filter(p => p.length > 0);
+    const gitIdx = pathParts.indexOf('_git');
+    if (gitIdx < 1 || gitIdx >= pathParts.length - 1) {
         return undefined;
     }
 
-    // Path: /{org}/{project}/_git/{repo}[/...]
-    const parts = url.pathname.split('/').filter(p => p.length > 0);
-    if (parts.length < 4) { return undefined; }
+    const repo = pathParts[gitIdx + 1].replace(/\.git$/, '');
+    const beforeGit = pathParts.slice(0, gitIdx);
 
-    const owner = parts[0];
-    const project = parts[1];
-    if (parts[2] !== '_git') { return undefined; }
-    const repo = parts[3].replace(/\.git$/, '');
+    let owner: string;
+    let project: string;
+
+    if (host === 'dev.azure.com') {
+        // /{org}/{project}/_git/{repo}
+        if (beforeGit.length !== 2) {
+            return undefined;
+        }
+        owner = beforeGit[0];
+        project = beforeGit[1];
+    } else if (host.endsWith('.visualstudio.com')) {
+        const sub = host.slice(0, -'.visualstudio.com'.length);
+        if (!sub || sub.includes('.')) {
+            return undefined;
+        }
+        owner = sub;
+        // /{project}/_git/{repo} or /DefaultCollection/{project}/_git/{repo}
+        if (beforeGit.length === 1) {
+            project = beforeGit[0];
+        } else if (beforeGit.length === 2 && beforeGit[0].toLowerCase() === 'defaultcollection') {
+            project = beforeGit[1];
+        } else {
+            return undefined;
+        }
+    } else {
+        return undefined;
+    }
 
     // Optional branch from query: version=GB<branch>
     let branch: string | undefined;
     const version = url.searchParams.get('version');
-    if (version && version.startsWith('GB')) {
+    if (version && version.toUpperCase().startsWith('GB')) {
         branch = version.slice(2) || undefined;
     }
 
@@ -2155,13 +2191,13 @@ export async function activate(context: vscode.ExtensionContext) {
         // Add a new skill repository from a GitHub or Azure DevOps URL
         vscode.commands.registerCommand('AIToolsOrganizer.addRepository', async () => {
             const input = await vscode.window.showInputBox({
-                prompt: 'Enter a GitHub or Azure DevOps repository URL',
-                placeHolder: 'https://github.com/owner/repo  or  https://dev.azure.com/org/project/_git/repo',
+                prompt: 'Repository URL (GitHub or Azure DevOps Git)',
+                placeHolder: 'https://github.com/org/repo  or  https://dev.azure.com/org/project/_git/repo',
                 validateInput: value => {
                     if (!value?.trim()) { return 'URL is required'; }
                     return (parseGitHubUrl(value) || parseAzureDevOpsGitUrl(value))
                         ? undefined
-                        : 'Could not parse a GitHub or Azure DevOps repository URL from that input';
+                        : 'Use a GitHub URL (https://github.com/org/repo) or an Azure DevOps Git URL (https://dev.azure.com/org/project/_git/repo, or org.visualstudio.com/project/_git/repo). Include https:// if your paste omits it.';
                 }
             });
             if (!input) { return; }

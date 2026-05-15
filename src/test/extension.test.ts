@@ -623,6 +623,35 @@ suite('Extension Test Suite', () => {
 			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: undefined });
 		});
 
+		test('parses org-named user before host (common ADO clone URL)', () => {
+			const result = parseAzureDevOpsGitUrl(
+				'https://CSGDevOpsAutomation@dev.azure.com/CSGDevOpsAutomation/RMDM-DWMS-SingleviewSolutions/_git/ec-agent-plugins'
+			);
+			assert.deepStrictEqual(result, {
+				owner: 'CSGDevOpsAutomation',
+				project: 'RMDM-DWMS-SingleviewSolutions',
+				repo: 'ec-agent-plugins',
+				branch: undefined
+			});
+		});
+
+		test('accepts dev.azure.com URL without https:// prefix', () => {
+			const result = parseAzureDevOpsGitUrl('dev.azure.com/myOrg/myProject/_git/myRepo');
+			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: undefined });
+		});
+
+		test('parses visualstudio.com project URL', () => {
+			const result = parseAzureDevOpsGitUrl('https://myOrg.visualstudio.com/MyProject/_git/MyRepo');
+			assert.deepStrictEqual(result, { owner: 'myorg', project: 'MyProject', repo: 'MyRepo', branch: undefined });
+		});
+
+		test('parses visualstudio.com URL with DefaultCollection segment', () => {
+			const result = parseAzureDevOpsGitUrl(
+				'https://myorg.visualstudio.com/DefaultCollection/MyProject/_git/MyRepo'
+			);
+			assert.deepStrictEqual(result, { owner: 'myorg', project: 'MyProject', repo: 'MyRepo', branch: undefined });
+		});
+
 		test('extracts branch from version=GB query param', () => {
 			const result = parseAzureDevOpsGitUrl('https://dev.azure.com/myOrg/myProject/_git/myRepo?version=GBdevelop');
 			assert.deepStrictEqual(result, { owner: 'myOrg', project: 'myProject', repo: 'myRepo', branch: 'develop' });
