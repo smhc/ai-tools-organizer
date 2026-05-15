@@ -1585,6 +1585,7 @@
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
     "package:vsix": "npx vsce package",
+    "publish:ovsx": "npx ovsx publish",
     "install:vsix": "npx vsce package && npm run install:vsix:only",
     "install:vsix:only": "node -e \"const fs=require('fs'); const files=fs.readdirSync('.').filter(f=>f.startsWith('agent-organizer-')&&f.endsWith('.vsix')).sort(); if(files.length) require('child_process').execSync('code-insiders --install-extension '+files[files.length-1], {stdio:'inherit'});\"",
     "uninstall:vsix": "code-insiders --uninstall-extension smaglio81.agent-organizer",
