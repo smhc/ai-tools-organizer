@@ -2183,7 +2183,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 try {
                     branch = adoParsed.branch ?? await githubClient.fetchDefaultBranch(tempRepo);
                 } catch {
-                    vscode.window.showErrorMessage('Failed to fetch repository information from Azure DevOps. Check the URL, your network connection, and the AIToolsOrganizer.azureDevOpsPat setting.');
+                    vscode.window.showErrorMessage('Failed to fetch repository information from Azure DevOps. Check the URL, your network connection, and AIToolsOrganizer.azureDevOpsPat or AZURE_DEVOPS_EXT_PAT.');
                     return;
                 }
                 newRepo = { owner: adoParsed.owner, project: adoParsed.project, repo: adoParsed.repo, branch };

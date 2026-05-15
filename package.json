@@ -1607,7 +1607,7 @@
         "AIToolsOrganizer.azureDevOpsPat": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Azure DevOps Personal Access Token for accessing ADO Git repositories. Requires **Code (read)** permission. Only needed when using Azure DevOps repositories in `#AIToolsOrganizer.skillRepositories#`.",
+          "markdownDescription": "Azure DevOps Personal Access Token for accessing ADO Git repositories. Requires **Code (read)** permission. Only needed when using Azure DevOps repositories in `#AIToolsOrganizer.skillRepositories#`. If empty, the extension also uses the `AZURE_DEVOPS_EXT_PAT` environment variable (e.g. set in your shell profile or CI).",
           "scope": "application"
         },
         "AIToolsOrganizer.cacheTimeout": {

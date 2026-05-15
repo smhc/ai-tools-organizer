@@ -5,7 +5,8 @@
  * File content : Git Items API with download=true.
  * Default branch: Git Repositories API (strips "refs/heads/" prefix).
  *
- * Auth: HTTP Basic with empty username + PAT read from AIToolsOrganizer.azureDevOpsPat.
+ * Auth: HTTP Basic with empty username + PAT from AIToolsOrganizer.azureDevOpsPat,
+ * or if unset, from the AZURE_DEVOPS_EXT_PAT environment variable.
  * For public projects PAT may be omitted, but many org-level projects require it.
  */
 
@@ -55,7 +56,7 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
             if (response.status === 401 || response.status === 403) {
                 vscode.window.showErrorMessage(
                     `Azure DevOps authentication failed (${response.status}). ` +
-                    'Set a Personal Access Token with Code (read) permission in the AIToolsOrganizer.azureDevOpsPat setting.'
+                    'Set a Personal Access Token with Code (read) permission in AIToolsOrganizer.azureDevOpsPat or the AZURE_DEVOPS_EXT_PAT environment variable.'
                 );
             }
             if (response.status === 404) {
@@ -115,7 +116,7 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
             if (response.status === 401 || response.status === 403) {
                 vscode.window.showErrorMessage(
                     `Azure DevOps authentication failed (${response.status}). ` +
-                    'Check the AIToolsOrganizer.azureDevOpsPat setting.'
+                    'Check AIToolsOrganizer.azureDevOpsPat or the AZURE_DEVOPS_EXT_PAT environment variable.'
                 );
             }
             throw new Error(`Failed to fetch file from Azure DevOps: ${response.status}`);
@@ -150,9 +151,20 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
         return `https://dev.azure.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.project!)}`;
     }
 
-    private async fetchWithAuth(url: string): Promise<Response> {
+    /**
+     * PAT resolution: user setting first, then AZURE_DEVOPS_EXT_PAT (e.g. CI or shell profile).
+     */
+    private getAzureDevOpsPat(): string {
         const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
-        const pat = config.get<string>('azureDevOpsPat', '');
+        const fromSettings = (config.get<string>('azureDevOpsPat', '') || '').trim();
+        if (fromSettings) {
+            return fromSettings;
+        }
+        return (process.env.AZURE_DEVOPS_EXT_PAT || '').trim();
+    }
+
+    private async fetchWithAuth(url: string): Promise<Response> {
+        const pat = this.getAzureDevOpsPat();
 
         const headers: Record<string, string> = {
             'Accept': 'application/json',

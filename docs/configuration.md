@@ -64,7 +64,9 @@ Optional. Provides higher GitHub API rate limits when browsing many repositories
 
 **Setting**: `AIToolsOrganizer.azureDevOpsPat`
 
-Required when using private Azure DevOps repositories or organization-level projects. Create a Personal Access Token in your Azure DevOps organization with **Code (read)** permission. Leave blank for public projects that allow anonymous access.
+Required when using private Azure DevOps repositories or organization-level projects (unless you provide a token another way). Create a Personal Access Token in your Azure DevOps organization with **Code (read)** permission. Leave blank for public projects that allow anonymous access.
+
+**Environment variable**: `AZURE_DEVOPS_EXT_PAT` — if the setting is empty, the extension uses this variable. Useful for terminals/CI or when you prefer not to store the PAT in VS Code settings.
 
 ## Cache timeout
 
