@@ -56,21 +56,6 @@ For detailed guides, see the [docs](docs/) folder:
 - [Plugin workflows](docs/plugins.md)
 - [Configuration](docs/configuration.md)
 
-## Default repositories
-
-The extension comes pre-configured with these **GitHub** repositories:
-
-| Repository | Content |
-|---|---|
-| anthropics/claude-code | Claude Code tools |
-| anthropics/skills | Anthropic's official skills |
-| github/awesome-copilot | Community agents, hooks, instructions, plugins, prompts, skills |
-| formulahendry/agent-skill-code-runner | Code runner skill |
-| iamaanahmad/everything-kiro-ide | Kiro IDE hooks and tools |
-| microsoftdocs/mcp | Microsoft MCP documentation |
-| openai/skills | OpenAI curated skills |
-| pytorch/pytorch | PyTorch skills |
-
 Add **GitHub** or **Azure DevOps** repositories from the Marketplace toolbar (paste the clone or web URL) or in Settings. For Azure DevOps, each entry needs `owner` (organization), `project`, `repo`, and `branch` — see [Configuration](docs/configuration.md#repositories).
 
 ## For Skill Developers

@@ -1507,48 +1507,7 @@
       "properties": {
         "AIToolsOrganizer.skillRepositories": {
           "type": "array",
-          "default": [
-            {
-              "owner": "anthropics",
-              "repo": "claude-code",
-              "branch": "main"
-            },
-            {
-              "owner": "anthropics",
-              "repo": "skills",
-              "branch": "main"
-            },
-            {
-              "owner": "github",
-              "repo": "awesome-copilot",
-              "branch": "main"
-            },
-            {
-              "owner": "formulahendry",
-              "repo": "agent-skill-code-runner",
-              "branch": "main"
-            },
-            {
-              "owner": "iamaanahmad",
-              "repo": "everything-kiro-ide",
-              "branch": "main"
-            },
-            {
-              "owner": "microsoftdocs",
-              "repo": "mcp",
-              "branch": "main"
-            },
-            {
-              "owner": "openai",
-              "repo": "skills",
-              "branch": "main"
-            },
-            {
-              "owner": "pytorch",
-              "repo": "pytorch",
-              "branch": "main"
-            }
-          ],
+          "default": [],
           "markdownDescription": "Repositories to fetch content from. Supports **GitHub** and **Azure DevOps** repositories. Use the **Add Repository** button in the Marketplace view to add repos from a URL.\n\n- GitHub: `{ \"owner\": \"...\", \"repo\": \"...\", \"branch\": \"main\" }`\n- Azure DevOps: `{ \"owner\": \"org\", \"project\": \"project\", \"repo\": \"repo\", \"branch\": \"main\" }`",
           "items": {
             "type": "object",

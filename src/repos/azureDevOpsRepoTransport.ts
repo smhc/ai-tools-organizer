@@ -148,7 +148,9 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
         });
         const url = `${base}/_apis/git/repositories/${encodeURIComponent(repo.repo)}/items?${params}`;
 
-        const response = await this.fetchWithAuth(url);
+        // Use text/plain Accept to get raw file content — application/json would cause
+        // ADO to return JSON metadata even when download=true is set.
+        const response = await this.fetchWithAuth(url, 'text/plain');
 
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
@@ -201,11 +203,11 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
         return (process.env.AZURE_DEVOPS_EXT_PAT || '').trim();
     }
 
-    private async fetchWithAuth(url: string): Promise<Response> {
+    private async fetchWithAuth(url: string, accept = 'application/json'): Promise<Response> {
         const pat = this.getAzureDevOpsPat();
 
         const headers: Record<string, string> = {
-            'Accept': 'application/json',
+            'Accept': accept,
         };
 
         if (pat) {

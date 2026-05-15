@@ -62,6 +62,8 @@ export const AREA_DEFINITIONS: Record<ContentArea, AreaDefinition> = {
         fileSuffix: '.agent.md',
         // Cursor also accepts bare .md, .mdc, .markdown for agents
         fileSuffixes: ['.agent.md', '.agent.mdc', '.mdc', '.md', '.markdown'],
+        // Suffixes are too generic (.md) to safely discover outside a conventional agents/ dir
+        conventionalOnly: true,
     },
     hooksGithub: { label: 'Hooks - GitHub', groupIcon: 'git-commit', kind: 'multiFile', definitionFile: 'hooks.json', conventionalOnly: true, iconPrefix: 'hooks', conventionalDir: 'hooks' },
     hooksKiro: { label: 'Hooks - Kiro', groupIcon: 'git-commit', kind: 'singleFile', fileSuffix: '.json', conventionalOnly: true, iconPrefix: 'hooks', conventionalDir: 'hooks' },
@@ -82,6 +84,8 @@ export const AREA_DEFINITIONS: Record<ContentArea, AreaDefinition> = {
         fileSuffix: '.prompt.md',
         // Cursor also accepts bare .md, .mdc, .markdown, .txt for commands
         fileSuffixes: ['.prompt.md', '.prompt.mdc', '.mdc', '.md', '.markdown', '.txt'],
+        // Suffixes are too generic (.md, .txt) to safely discover outside a conventional prompts/ dir
+        conventionalOnly: true,
     },
     rules: {
         label: 'Rules',
@@ -90,6 +94,8 @@ export const AREA_DEFINITIONS: Record<ContentArea, AreaDefinition> = {
         fileSuffix: '.mdc',
         fileSuffixes: ['.mdc', '.md', '.markdown'],
         conventionalDir: 'rules',
+        // Suffixes are too generic (.md, .mdc) to safely discover outside a conventional rules/ dir
+        conventionalOnly: true,
     },
     skills: { label: 'Skills', groupIcon: 'package', kind: 'multiFile', definitionFile: 'SKILL.md' },
 };
