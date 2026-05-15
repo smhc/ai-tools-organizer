@@ -9,7 +9,7 @@
  */
 
 import * as vscode from 'vscode';
-import { Skill, SkillRepository, SkillMetadata, CacheEntry, FailedRepository, readRepositoriesConfig, ContentArea, ALL_CONTENT_AREAS, AREA_DEFINITIONS, AreaFileItem, RepoContent, AreaPaths, isYamlBlockScalar, stripYamlQuotes, collectBlockScalarValue } from '../types';
+import { Skill, SkillRepository, SkillMetadata, CacheEntry, FailedRepository, readRepositoriesConfig, ContentArea, ALL_CONTENT_AREAS, AREA_DEFINITIONS, AreaFileItem, RepoContent, AreaPaths, isYamlBlockScalar, stripYamlQuotes, collectBlockScalarValue, getAreaFileSuffixes, deriveItemName } from '../types';
 
 /**
  * GitHub Git Tree item from Trees API
@@ -433,17 +433,29 @@ export class GitHubSkillsClient {
 
             // Verify the directory actually contains matching content
             if (def.kind === 'multiFile' && def.definitionFile) {
-                const hasContent = tree.tree.some(item =>
+                // Check primary definition file
+                let hasContent = tree.tree.some(item =>
                     item.type === 'blob' &&
                     item.path.startsWith(dirName + '/') &&
                     item.path.endsWith(`/${def.definitionFile}`)
                 );
+                // Also check alternate definition files (e.g. .cursor-plugin/plugin.json)
+                if (!hasContent) {
+                    hasContent = (def.alternateDefinitionFiles ?? []).some(alt =>
+                        tree.tree.some(item =>
+                            item.type === 'blob' &&
+                            item.path.startsWith(dirName + '/') &&
+                            item.path.endsWith(`/${alt}`)
+                        )
+                    );
+                }
                 if (hasContent) { result[area] = dirName; }
-            } else if (def.kind === 'singleFile' && def.fileSuffix) {
+            } else if (def.kind === 'singleFile') {
+                const suffixes = getAreaFileSuffixes(def);
                 const hasContent = tree.tree.some(item =>
                     item.type === 'blob' &&
                     item.path.startsWith(dirName + '/') &&
-                    item.path.endsWith(def.fileSuffix!)
+                    suffixes.some(s => item.path.endsWith(s))
                 );
                 if (hasContent) { result[area] = dirName; }
             }
@@ -462,18 +474,20 @@ export class GitHubSkillsClient {
             if (def.conventionalOnly) { continue; } // Only discoverable via conventional top-level dir name
 
             if (def.kind === 'multiFile' && def.definitionFile) {
+                // Collect all definition file candidates (primary + alternates)
+                const defFileSuffixes = [def.definitionFile, ...(def.alternateDefinitionFiles ?? [])];
                 const defFiles = tree.tree.filter(item =>
                     item.type === 'blob' &&
-                    item.path.endsWith(`/${def.definitionFile}`) &&
+                    defFileSuffixes.some(d => item.path.endsWith(`/${d}`) || item.path === d) &&
                     !discoveredPrefixes.some(p => item.path.startsWith(p))
                 );
                 if (defFiles.length > 0) {
                     const dirCounts = new Map<string, number>();
                     for (const item of defFiles) {
-                        const skillDir = item.path.substring(0, item.path.lastIndexOf('/'));
-                        const parentDir = skillDir.includes('/')
-                            ? skillDir.substring(0, skillDir.lastIndexOf('/'))
-                            : skillDir;
+                        const itemRoot = this.resolvePluginRootFromDefPath(item.path);
+                        const parentDir = itemRoot.includes('/')
+                            ? itemRoot.substring(0, itemRoot.lastIndexOf('/'))
+                            : '';
                         dirCounts.set(parentDir, (dirCounts.get(parentDir) || 0) + 1);
                     }
                     let bestDir = '';
@@ -484,10 +498,11 @@ export class GitHubSkillsClient {
                     result[area] = bestDir;
                     if (bestDir) { discoveredPrefixes.push(bestDir + '/'); }
                 }
-            } else if (def.kind === 'singleFile' && def.fileSuffix) {
+            } else if (def.kind === 'singleFile') {
+                const suffixes = getAreaFileSuffixes(def);
                 const matchingFiles = tree.tree.filter(item =>
                     item.type === 'blob' &&
-                    item.path.endsWith(def.fileSuffix!) &&
+                    suffixes.some(s => item.path.endsWith(s)) &&
                     !discoveredPrefixes.some(p => item.path.startsWith(p))
                 );
                 if (matchingFiles.length > 0) {
@@ -508,7 +523,48 @@ export class GitHubSkillsClient {
             }
         }
 
+        // Step 3: Check for a Cursor marketplace manifest (.cursor-plugin/marketplace.json).
+        // This handles multi-plugin repos that list plugins explicitly.
+        // Conventional plugins/ layout (Steps 1/2) takes precedence; marketplace is only used
+        // when those steps did not find a plugins area.
+        if (result['plugins'] === undefined) {
+            const hasMarketplace = tree.tree.some(
+                item => item.type === 'blob' && item.path === '.cursor-plugin/marketplace.json'
+            );
+            if (hasMarketplace) {
+                // Signal that this repo uses the Cursor marketplace format;
+                // actual per-plugin expansion happens in fetchRepoContent.
+                result['plugins'] = '.cursor-plugin/marketplace';
+            }
+        }
+
         return result;
+    }
+
+    /**
+     * Given a definition file blob path, resolve the plugin root directory by removing
+     * the definition filename and any trailing wrapper directory segments
+     * (e.g. `.cursor-plugin`, `.claude-plugin`, `plugin`, `hooks`).
+     *
+     * Examples:
+     *   "my-plugin/.cursor-plugin/plugin.json" → "my-plugin"
+     *   ".cursor-plugin/plugin.json"            → ""  (repo root)
+     *   "plugins/my-plugin/plugin.json"         → "plugins/my-plugin"
+     */
+    private resolvePluginRootFromDefPath(blobPath: string): string {
+        const segments = blobPath.split('/');
+        // Remove the filename
+        segments.pop();
+        // Remove trailing wrapper segments
+        while (segments.length > 0) {
+            const last = segments[segments.length - 1];
+            if (last.startsWith('.') || last === 'plugin' || last === 'hooks') {
+                segments.pop();
+            } else {
+                break;
+            }
+        }
+        return segments.join('/');
     }
 
     /**
@@ -548,38 +604,30 @@ export class GitHubSkillsClient {
                 .map(([, prefix]) => prefix);
 
             if (def.kind === 'multiFile' && def.definitionFile) {
+                // Handle Cursor marketplace path — expand from .cursor-plugin/marketplace.json
+                if (areaPath === '.cursor-plugin/marketplace') {
+                    const marketplaceSkills = await this.fetchCursorMarketplacePlugins(repo, tree.tree, otherPrefixes);
+                    skills.push(...marketplaceSkills);
+                    continue;
+                }
+
                 const prefix = areaPath ? areaPath + '/' : '';
+                // Match both primary and alternate definition file suffixes
+                const defCandidates = [def.definitionFile, ...(def.alternateDefinitionFiles ?? [])];
                 const defFiles = tree.tree.filter(item =>
                     item.type === 'blob' &&
                     item.path.startsWith(prefix) &&
-                    item.path.endsWith(`/${def.definitionFile}`) &&
+                    defCandidates.some(d => item.path.endsWith(`/${d}`)) &&
                     !otherPrefixes.some(op => item.path.startsWith(op))
                 );
 
                 // Deduplicate: find the item root folder for each definition file.
                 // The item root is determined by removing the definition file and any
-                // known wrapper directories (e.g. .claude-plugin/, .github/plugin/).
-                // This handles repos that use category subfolders like plugins/agents/my-plugin/.claude-plugin/plugin.json
+                // known wrapper directories (e.g. .claude-plugin/, .cursor-plugin/, .github/plugin/).
                 const seenItems = new Map<string, string>(); // itemDir → first defFile path
                 for (const item of defFiles) {
-                    // Strip the area prefix and definition file name to get the relative structure
-                    // e.g. "plugins/agents/my-plugin/.claude-plugin/plugin.json" → "agents/my-plugin/.claude-plugin"
-                    const relativePath = item.path.substring(prefix.length);
-                    const segments = relativePath.split('/');
-                    // Remove the definition file name (last segment)
-                    segments.pop();
-                    // Remove known wrapper directory segments from the end
-                    while (segments.length > 0) {
-                        const last = segments[segments.length - 1];
-                        if (last.startsWith('.') || last === 'plugin' || last === 'hooks') {
-                            segments.pop();
-                        } else {
-                            break;
-                        }
-                    }
-                    // The remaining segments form the item path relative to the area
-                    const itemRelative = segments.join('/');
-                    const itemDir = itemRelative ? prefix + itemRelative : prefix.replace(/\/$/, '');
+                    const itemRoot = this.resolvePluginRootFromDefPath(item.path);
+                    const itemDir = itemRoot || (prefix ? prefix.replace(/\/$/, '') : '');
                     if (!seenItems.has(itemDir)) {
                         seenItems.set(itemDir, item.path);
                     }
@@ -617,17 +665,25 @@ export class GitHubSkillsClient {
                 );
                 skills.push(...items.filter((s): s is Skill => s !== null));
 
-            } else if (def.kind === 'singleFile' && def.fileSuffix) {
+            } else if (def.kind === 'singleFile') {
+                const suffixes = getAreaFileSuffixes(def);
                 const prefix = areaPath ? areaPath + '/' : '';
                 const matchingFiles = tree.tree.filter(item =>
                     item.type === 'blob' &&
-                    (areaPath === '' ? item.path.endsWith(def.fileSuffix!) : item.path.startsWith(prefix) && item.path.endsWith(def.fileSuffix!)) &&
+                    (areaPath === ''
+                        ? suffixes.some(s => item.path.endsWith(s))
+                        : item.path.startsWith(prefix) && suffixes.some(s => item.path.endsWith(s))
+                    ) &&
                     !otherPrefixes.some(op => item.path.startsWith(op))
                 );
 
+                // Deduplicate by display name (prefer more-specific suffix, already ordered in fileSuffixes)
+                const seenNames = new Set<string>();
                 for (const item of matchingFiles) {
                     const fileName = item.path.split('/').pop() || item.path;
-                    const name = fileName.substring(0, fileName.length - def.fileSuffix!.length);
+                    const name = deriveItemName(fileName, def);
+                    if (seenNames.has(name)) { continue; }
+                    seenNames.add(name);
 
                     const relativePath = areaPath ? item.path.substring(prefix.length) : item.path;
                     const folderPath = relativePath.includes('/')
@@ -646,6 +702,101 @@ export class GitHubSkillsClient {
         }
 
         return { skills, fileItems };
+    }
+
+    /**
+     * Expand a Cursor marketplace manifest (.cursor-plugin/marketplace.json) into Skill entries.
+     * Each entry in the manifest's `plugins` array becomes one plugin Skill.
+     * Per-plugin .cursor-plugin/plugin.json manifests are merged in (marketplace entry wins on
+     * name/description if provided).
+     *
+     * @param repo Source repository
+     * @param treeItems Full tree blob list (used to verify plugin manifests exist)
+     * @param otherPrefixes Prefixes already claimed by other areas (exclusion list)
+     */
+    private async fetchCursorMarketplacePlugins(
+        repo: SkillRepository,
+        treeItems: { path: string; type: string }[],
+        otherPrefixes: string[]
+    ): Promise<Skill[]> {
+        const branch = repo.branch || 'main';
+        let marketplaceJson: unknown;
+        try {
+            const raw = await this.fetchRawContent(repo.owner, repo.repo, '.cursor-plugin/marketplace.json', branch);
+            marketplaceJson = JSON.parse(raw);
+        } catch {
+            return [];
+        }
+
+        if (!marketplaceJson || typeof marketplaceJson !== 'object') { return []; }
+        const manifest = marketplaceJson as Record<string, unknown>;
+        const pluginsArray = manifest['plugins'];
+        if (!Array.isArray(pluginsArray)) { return []; }
+
+        // Optional global prefix for all plugin source paths
+        const pluginRoot = (manifest['metadata'] as Record<string, unknown> | undefined)?.['pluginRoot'];
+        const globalPrefix = typeof pluginRoot === 'string' && pluginRoot ? pluginRoot.replace(/\/+$/, '') : '';
+
+        const skills: Skill[] = [];
+
+        for (const entry of pluginsArray) {
+            if (!entry || typeof entry !== 'object') { continue; }
+            const e = entry as Record<string, unknown>;
+
+            const entryName = typeof e['name'] === 'string' ? e['name'] : '';
+            const entryDesc = typeof e['description'] === 'string' ? e['description'] : '';
+
+            // Resolve source path
+            const rawSource = typeof e['source'] === 'string'
+                ? e['source']
+                : (e['source'] && typeof e['source'] === 'object' && typeof (e['source'] as Record<string, unknown>)['path'] === 'string'
+                    ? (e['source'] as Record<string, unknown>)['path'] as string
+                    : '');
+            if (!rawSource || rawSource.includes('..')) { continue; }
+            const pluginDir = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
+
+            // Reject paths outside the repo or already claimed by another area
+            if (otherPrefixes.some(p => pluginDir.startsWith(p))) { continue; }
+
+            // Verify the plugin has a manifest in the tree
+            const manifestPath = `${pluginDir}/.cursor-plugin/plugin.json`;
+            const hasManifest = treeItems.some(i => i.type === 'blob' && i.path === manifestPath);
+            if (!hasManifest) { continue; }
+
+            // Fetch per-plugin manifest and merge (per-plugin wins on name/description)
+            let name = entryName || pluginDir.split('/').pop() || pluginDir;
+            let description = entryDesc;
+            let bodyContent: string | undefined;
+            let fullContent: string | undefined;
+            try {
+                const perPluginRaw = await this.fetchRawContent(repo.owner, repo.repo, manifestPath, branch);
+                const perPlugin = JSON.parse(perPluginRaw) as Record<string, unknown>;
+                if (typeof perPlugin['name'] === 'string' && perPlugin['name']) { name = perPlugin['name']; }
+                if (typeof perPlugin['description'] === 'string' && perPlugin['description']) { description = perPlugin['description']; }
+                fullContent = perPluginRaw;
+            } catch { /* missing or invalid per-plugin manifest */ }
+
+            // Try README.md at the plugin root for body content
+            try {
+                const readmeRaw = await this.fetchRawContent(repo.owner, repo.repo, `${pluginDir}/README.md`, branch);
+                const parsed = this.parseSkillMd(readmeRaw);
+                bodyContent = parsed.body || readmeRaw;
+                if (!fullContent) { fullContent = readmeRaw; }
+            } catch { /* no README */ }
+
+            skills.push({
+                name,
+                description: description || 'No description available',
+                source: repo,
+                skillPath: pluginDir,
+                area: 'plugins',
+                fullContent,
+                bodyContent,
+                definitionContent: fullContent,
+            });
+        }
+
+        return skills;
     }
 
     /**

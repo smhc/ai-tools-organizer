@@ -8,12 +8,12 @@ import * as vscode from 'vscode';
  * The recognized content areas in a repository.
  * Each area has its own detection pattern and display behavior.
  */
-export type ContentArea = 'agents' | 'hooksGithub' | 'hooksKiro' | 'instructions' | 'plugins' | 'powers' | 'prompts' | 'skills';
+export type ContentArea = 'agents' | 'hooksGithub' | 'hooksKiro' | 'instructions' | 'plugins' | 'powers' | 'prompts' | 'rules' | 'skills';
 
 /**
  * All recognized content areas in display order.
  */
-export const ALL_CONTENT_AREAS: ContentArea[] = ['agents', 'hooksGithub', 'hooksKiro', 'instructions', 'plugins', 'prompts', 'skills'];
+export const ALL_CONTENT_AREAS: ContentArea[] = ['agents', 'hooksGithub', 'hooksKiro', 'instructions', 'plugins', 'prompts', 'rules', 'skills'];
 
 /**
  * Metadata about each content area: how to detect it and what files define items.
@@ -25,10 +25,27 @@ export interface AreaDefinition {
     groupIcon: string;
     /** Whether items are single files or multi-file folders */
     kind: 'singleFile' | 'multiFile';
-    /** For singleFile areas: glob-like suffix to match (e.g. '.agent.md') */
+    /**
+     * For singleFile areas: the primary suffix to match (e.g. '.agent.md').
+     * Used as the scaffold default and kept for backward-compatibility.
+     * When `fileSuffixes` is also present, `fileSuffixes` drives matching and
+     * `fileSuffix` is used only when creating new items.
+     */
     fileSuffix?: string;
-    /** For multiFile areas: the definition file that must exist at the folder root */
+    /**
+     * For singleFile areas: all accepted suffixes in priority order.
+     * The first matching suffix is stripped to derive the display name.
+     * When absent, falls back to `fileSuffix`.
+     */
+    fileSuffixes?: string[];
+    /** For multiFile areas: the primary definition file (e.g. 'plugin.json', 'SKILL.md') */
     definitionFile?: string;
+    /**
+     * For multiFile areas: additional definition file paths to try when `definitionFile`
+     * is not present at the folder root. Tried in order after `definitionFile`.
+     * Paths may include subdirectories (e.g. '.cursor-plugin/plugin.json').
+     */
+    alternateDefinitionFiles?: string[];
     /** If true, only discover via conventional top-level directory name (skip fallback search) */
     conventionalOnly?: boolean;
     /** Override the icon file prefix (defaults to the area key). Used when two areas share icons. */
@@ -38,15 +55,75 @@ export interface AreaDefinition {
 }
 
 export const AREA_DEFINITIONS: Record<ContentArea, AreaDefinition> = {
-    agents: { label: 'Agents', groupIcon: 'hubot', kind: 'singleFile', fileSuffix: '.agent.md' },
+    agents: {
+        label: 'Agents',
+        groupIcon: 'hubot',
+        kind: 'singleFile',
+        fileSuffix: '.agent.md',
+        // Cursor also accepts bare .md, .mdc, .markdown for agents
+        fileSuffixes: ['.agent.md', '.agent.mdc', '.mdc', '.md', '.markdown'],
+    },
     hooksGithub: { label: 'Hooks - GitHub', groupIcon: 'git-commit', kind: 'multiFile', definitionFile: 'hooks.json', conventionalOnly: true, iconPrefix: 'hooks', conventionalDir: 'hooks' },
     hooksKiro: { label: 'Hooks - Kiro', groupIcon: 'git-commit', kind: 'singleFile', fileSuffix: '.json', conventionalOnly: true, iconPrefix: 'hooks', conventionalDir: 'hooks' },
     instructions: { label: 'Instructions', groupIcon: 'note', kind: 'singleFile', fileSuffix: '.instructions.md' },
-    plugins: { label: 'Plugins', groupIcon: 'plug', kind: 'multiFile', definitionFile: 'plugin.json' },
+    plugins: {
+        label: 'Plugins',
+        groupIcon: 'plug',
+        kind: 'multiFile',
+        definitionFile: 'plugin.json',
+        // Cursor's canonical manifest lives under .cursor-plugin/
+        alternateDefinitionFiles: ['.cursor-plugin/plugin.json'],
+    },
     powers: { label: 'Powers', groupIcon: 'zap', kind: 'multiFile', definitionFile: 'POWER.md' },
-    prompts: { label: 'Prompts / Commands', groupIcon: 'comment-discussion', kind: 'singleFile', fileSuffix: '.prompt.md' },
+    prompts: {
+        label: 'Prompts / Commands',
+        groupIcon: 'comment-discussion',
+        kind: 'singleFile',
+        fileSuffix: '.prompt.md',
+        // Cursor also accepts bare .md, .mdc, .markdown, .txt for commands
+        fileSuffixes: ['.prompt.md', '.prompt.mdc', '.mdc', '.md', '.markdown', '.txt'],
+    },
+    rules: {
+        label: 'Rules',
+        groupIcon: 'law',
+        kind: 'singleFile',
+        fileSuffix: '.mdc',
+        fileSuffixes: ['.mdc', '.md', '.markdown'],
+        conventionalDir: 'rules',
+    },
     skills: { label: 'Skills', groupIcon: 'package', kind: 'multiFile', definitionFile: 'SKILL.md' },
 };
+
+/**
+ * Return the effective list of suffixes for a singleFile area definition.
+ * Prefers `fileSuffixes` when present, otherwise wraps `fileSuffix`.
+ */
+export function getAreaFileSuffixes(def: AreaDefinition): string[] {
+    if (def.fileSuffixes && def.fileSuffixes.length > 0) {
+        return def.fileSuffixes;
+    }
+    return def.fileSuffix ? [def.fileSuffix] : [];
+}
+
+/**
+ * Derive the display name from a filename by stripping the first matching suffix
+ * from the area's suffix list. Returns the full filename when no suffix matches.
+ */
+export function deriveItemName(fileName: string, def: AreaDefinition): string {
+    for (const suffix of getAreaFileSuffixes(def)) {
+        if (fileName.endsWith(suffix)) {
+            return fileName.slice(0, fileName.length - suffix.length);
+        }
+    }
+    return fileName;
+}
+
+/**
+ * Return true if the filename matches any suffix in the area's suffix list.
+ */
+export function fileMatchesArea(fileName: string, def: AreaDefinition): boolean {
+    return getAreaFileSuffixes(def).some(s => fileName.endsWith(s));
+}
 
 /**
  * Paths object mapping each content area to its path within the repository.

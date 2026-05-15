@@ -1,6 +1,6 @@
 {
-  "name": "agent-organizer",
-  "displayName": "AI Tools Organizer",
+  "name": "agent-organizer-cursor",
+  "displayName": "AI Tools Organizer - Cursor",
   "description": "AI Tools Organizer and Marketplace",
   "version": "0.2.2",
   "icon": "resources/logo.png",
@@ -97,6 +97,12 @@
           "name": "Prompts / Commands",
           "icon": "resources/prompts-icon.svg",
           "visibility": "collapsed"
+        },
+        {
+          "id": "AIToolsOrganizer.rules",
+          "name": "Rules",
+          "icon": "resources/rules-icon.svg",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -170,6 +176,16 @@
         "view": "AIToolsOrganizer.prompts",
         "contents": "No prompts found.",
         "when": "AIToolsOrganizer.prompts:initialScanComplete"
+      },
+      {
+        "view": "AIToolsOrganizer.rules",
+        "contents": "Loading ...",
+        "when": "!AIToolsOrganizer.rules:initialScanComplete"
+      },
+      {
+        "view": "AIToolsOrganizer.rules",
+        "contents": "No rules found.",
+        "when": "AIToolsOrganizer.rules:initialScanComplete"
       }
     ],
     "commands": [
@@ -426,6 +442,21 @@
         "icon": "$(close)"
       },
       {
+        "command": "AIToolsOrganizer.rules.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "AIToolsOrganizer.rules.search",
+        "title": "Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "AIToolsOrganizer.rules.clearSearch",
+        "title": "Clear Search",
+        "icon": "$(close)"
+      },
+      {
         "command": "AIToolsOrganizer.agents.expandAll",
         "title": "Expand All",
         "icon": "$(expand-all)"
@@ -456,6 +487,11 @@
         "icon": "$(expand-all)"
       },
       {
+        "command": "AIToolsOrganizer.rules.expandAll",
+        "title": "Expand All",
+        "icon": "$(expand-all)"
+      },
+      {
         "command": "AIToolsOrganizer.agents.selectDefaultDownloadLocation",
         "title": "Default Download Location",
         "icon": "$(folder)"
@@ -482,6 +518,11 @@
       },
       {
         "command": "AIToolsOrganizer.prompts.selectDefaultDownloadLocation",
+        "title": "Default Download Location",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "AIToolsOrganizer.rules.selectDefaultDownloadLocation",
         "title": "Default Download Location",
         "icon": "$(folder)"
       },
@@ -542,6 +583,10 @@
         "title": "Add Prompt"
       },
       {
+        "command": "AIToolsOrganizer.newRuleAtLocation",
+        "title": "Add Rule"
+      },
+      {
         "command": "AIToolsOrganizer.agents.newItem",
         "title": "Add Agent",
         "icon": "$(add)"
@@ -569,6 +614,11 @@
       {
         "command": "AIToolsOrganizer.prompts.newItem",
         "title": "Add Prompt",
+        "icon": "$(add)"
+      },
+      {
+        "command": "AIToolsOrganizer.rules.newItem",
+        "title": "Add Rule",
         "icon": "$(add)"
       },
       {
@@ -858,6 +908,36 @@
           "command": "AIToolsOrganizer.prompts.expandAll",
           "when": "view == AIToolsOrganizer.prompts",
           "group": "navigation@5"
+        },
+        {
+          "command": "AIToolsOrganizer.rules.search",
+          "when": "view == AIToolsOrganizer.rules",
+          "group": "navigation@1"
+        },
+        {
+          "command": "AIToolsOrganizer.rules.clearSearch",
+          "when": "view == AIToolsOrganizer.rules && AIToolsOrganizer.rules:searchActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "AIToolsOrganizer.rules.refresh",
+          "when": "view == AIToolsOrganizer.rules",
+          "group": "navigation@2"
+        },
+        {
+          "command": "AIToolsOrganizer.rules.selectDefaultDownloadLocation",
+          "when": "view == AIToolsOrganizer.rules",
+          "group": "navigation@3"
+        },
+        {
+          "command": "AIToolsOrganizer.rules.newItem",
+          "when": "view == AIToolsOrganizer.rules",
+          "group": "navigation@4"
+        },
+        {
+          "command": "AIToolsOrganizer.rules.expandAll",
+          "when": "view == AIToolsOrganizer.rules",
+          "group": "navigation@5"
         }
       ],
       "view/item/context": [
@@ -1129,6 +1209,11 @@
         {
           "command": "AIToolsOrganizer.newPromptAtLocation",
           "when": "viewItem == areaLocation && view == AIToolsOrganizer.prompts",
+          "group": "0_add@1"
+        },
+        {
+          "command": "AIToolsOrganizer.newRuleAtLocation",
+          "when": "viewItem == areaLocation && view == AIToolsOrganizer.rules",
           "group": "0_add@1"
         },
         {
@@ -1492,11 +1577,12 @@
             "hooksGithub": "~/.copilot/hooks",
             "hooksKiro": ".kiro/hooks",
             "instructions": "~/.copilot/instructions",
-            "plugins": "~/.copilot/plugins",
+            "plugins": "~/.cursor/plugins/local",
             "prompts": "~/.copilot/prompts",
+            "rules": "~/.cursor/rules",
             "skills": "~/.copilot/skills"
           },
-          "description": "Per-area default download locations. Keys are area identifiers (agents, hooksGithub, hooksKiro, instructions, plugins, prompts, skills). Values are path strings.",
+          "description": "Per-area default download locations. Keys are area identifiers (agents, hooksGithub, hooksKiro, instructions, plugins, prompts, rules, skills). Values are path strings.",
           "properties": {
             "agents": { "type": "string", "description": "Default download location for agents" },
             "hooksGithub": { "type": "string", "description": "Default download location for GitHub hooks" },
@@ -1504,6 +1590,7 @@
             "instructions": { "type": "string", "description": "Default download location for instructions" },
             "plugins": { "type": "string", "description": "Default download location for plugins" },
             "prompts": { "type": "string", "description": "Default download location for prompts" },
+            "rules": { "type": "string", "description": "Default download location for Cursor rules (.mdc files)" },
             "skills": { "type": "string", "description": "Default download location for skills" }
           },
           "additionalProperties": false

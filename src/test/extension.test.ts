@@ -736,5 +736,17 @@ suite('Extension Test Suite', () => {
 			}, () => service.getDefaultDownloadLocations('agents'));
 			assert.deepStrictEqual(result, ['~/.copilot/agents'], 'Should filter out empty paths');
 		});
+
+		test('plugins default locations include ~/.cursor/plugins/local', () => {
+			const service = new MockConfigSkillPathService();
+			const result = withMockChatConfig({}, () => service.getDefaultDownloadLocations('plugins'));
+			assert.ok(result.includes('~/.cursor/plugins/local'), 'Should include Cursor user plugin install root');
+		});
+
+		test('rules default locations include ~/.cursor/rules', () => {
+			const service = new MockConfigSkillPathService();
+			const result = withMockChatConfig({}, () => service.getDefaultDownloadLocations('rules'));
+			assert.ok(result.includes('~/.cursor/rules'), 'Should include Cursor rules directory');
+		});
 	});
 });

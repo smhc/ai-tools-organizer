@@ -11,7 +11,7 @@ import { InstalledAreaTreeDataProvider, AreaInstalledItemTreeItem, AreaLocationT
 import { SkillDetailPanel } from './views/skillDetailPanel';
 import { SkillInstallationService } from './services/installationService';
 import { SkillPathService } from './services/skillPathService';
-import { Skill, InstalledSkill, SkillRepository, isSameRepository, normalizeSeparators, buildGitHubUrl, readRepositoriesConfig, writeRepositoriesConfig, AreaFileItem, ContentArea, AREA_DEFINITIONS } from './types';
+import { Skill, InstalledSkill, SkillRepository, isSameRepository, normalizeSeparators, buildGitHubUrl, readRepositoriesConfig, writeRepositoriesConfig, AreaFileItem, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea } from './types';
 import { PLUGIN_SUBFOLDER_TO_AREA, PLUGIN_AREA_SUBFOLDERS, AREA_TO_PLUGIN_SUBFOLDER, resolveInstalledItemUri, syncPluginItem } from './services/pluginSyncService';
 
 /**
@@ -302,6 +302,7 @@ export async function activate(context: vscode.ExtensionContext) {
         { area: 'instructions', viewId: 'AIToolsOrganizer.instructions' },
         { area: 'plugins', viewId: 'AIToolsOrganizer.plugins' },
         { area: 'prompts', viewId: 'AIToolsOrganizer.prompts' },
+        { area: 'rules', viewId: 'AIToolsOrganizer.rules' },
     ];
 
     const areaProviders = new Map<string, InstalledAreaTreeDataProvider>();
@@ -625,7 +626,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 const readmeMd = `---\nname: ${name}\ndescription: \nmetadata:\n  version: "${todayStamp()}"\n---\n`;
                 const readmeUri = vscode.Uri.joinPath(folderUri, 'README.md');
                 await vscode.workspace.fs.writeFile(readmeUri, new TextEncoder().encode(readmeMd));
-                // plugin.json
+                // plugin.json (root-level, for Copilot/GitHub compatibility)
                 const pluginJson = JSON.stringify({
                     name,
                     description: '',
@@ -639,17 +640,32 @@ export async function activate(context: vscode.ExtensionContext) {
                 // .mcp.json
                 const mcpJson = JSON.stringify({ mcpServers: {} }, null, 2) + '\n';
                 await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(folderUri, '.mcp.json'), new TextEncoder().encode(mcpJson));
-                // .claude-plugin/plugin.json symlink — VS Code FS API doesn't support symlinks,
-                // so create a copy with a comment noting it mirrors the root plugin.json
+                // .claude-plugin/plugin.json — copy for Claude compatibility (VS Code FS has no symlink API)
                 const claudePluginDir = vscode.Uri.joinPath(folderUri, '.claude-plugin');
                 await vscode.workspace.fs.createDirectory(claudePluginDir);
                 await vscode.workspace.fs.copy(vscode.Uri.joinPath(folderUri, 'plugin.json'), vscode.Uri.joinPath(claudePluginDir, 'plugin.json'));
-                await vscode.commands.executeCommand('vscode.open', vscode.Uri.joinPath(folderUri, 'plugin.json'));
+                // .cursor-plugin/plugin.json — Cursor's canonical manifest location
+                const cursorPluginDir = vscode.Uri.joinPath(folderUri, '.cursor-plugin');
+                await vscode.workspace.fs.createDirectory(cursorPluginDir);
+                await vscode.workspace.fs.copy(vscode.Uri.joinPath(folderUri, 'plugin.json'), vscode.Uri.joinPath(cursorPluginDir, 'plugin.json'));
+                // rules/ — empty directory with a placeholder rule file for Cursor's default layout
+                const rulesDir = vscode.Uri.joinPath(folderUri, 'rules');
+                await vscode.workspace.fs.createDirectory(rulesDir);
+                const placeholderRule = `---\ndescription: ${name} coding standards\nalwaysApply: false\n---\n\n# ${name} rules\n\nAdd your Cursor rules here.\n`;
+                await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(rulesDir, `${name}.mdc`), new TextEncoder().encode(placeholderRule));
+                await vscode.commands.executeCommand('vscode.open', vscode.Uri.joinPath(cursorPluginDir, 'plugin.json'));
                 break;
             }
             case 'prompts': {
                 const fileUri = vscode.Uri.joinPath(locationUri, `${name}.prompt.md`);
                 const content = `---\nname: ${name}\ndescription: \n---\n`;
+                await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(content));
+                await vscode.commands.executeCommand('vscode.open', fileUri);
+                break;
+            }
+            case 'rules': {
+                const fileUri = vscode.Uri.joinPath(locationUri, `${name}.mdc`);
+                const content = `---\ndescription: \nalwaysApply: false\n---\n`;
                 await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(content));
                 await vscode.commands.executeCommand('vscode.open', fileUri);
                 break;
@@ -1620,8 +1636,8 @@ export async function activate(context: vscode.ExtensionContext) {
                     for (const [name] of entries) {
                         const itemUri = vscode.Uri.joinPath(subfolderUri, name);
                         const def = AREA_DEFINITIONS[area];
-                        const itemName = def.kind === 'singleFile' && def.fileSuffix && name.endsWith(def.fileSuffix)
-                            ? name.substring(0, name.length - def.fileSuffix.length)
+                        const itemName = def.kind === 'singleFile' && fileMatchesArea(name, def)
+                            ? deriveItemName(name, def)
                             : name;
                         const resolveUri = (i: InstalledSkill) => resolveInstalledItemUri(i, pathService);
                         const result = await syncPluginItem(itemUri, itemName, sourceItems, resolveUri);
@@ -1672,8 +1688,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 for (const [name] of entries) {
                     const itemUri = vscode.Uri.joinPath(item.folderUri, name);
                     const def = AREA_DEFINITIONS[area];
-                    const itemName = def.kind === 'singleFile' && def.fileSuffix && name.endsWith(def.fileSuffix)
-                        ? name.substring(0, name.length - def.fileSuffix.length)
+                    const itemName = def.kind === 'singleFile' && fileMatchesArea(name, def)
+                        ? deriveItemName(name, def)
                         : name;
 
                     const resolveUri = (i: InstalledSkill) => resolveInstalledItemUri(i, pathService);
@@ -1745,8 +1761,8 @@ export async function activate(context: vscode.ExtensionContext) {
             }
 
             const def = AREA_DEFINITIONS[area];
-            const itemName = def.kind === 'singleFile' && def.fileSuffix && itemFileName.endsWith(def.fileSuffix)
-                ? itemFileName.substring(0, itemFileName.length - def.fileSuffix.length)
+            const itemName = def.kind === 'singleFile' && fileMatchesArea(itemFileName, def)
+                ? deriveItemName(itemFileName, def)
                 : itemFileName;
 
             const resolveUri = (i: InstalledSkill) => resolveInstalledItemUri(i, pathService);
@@ -2036,6 +2052,7 @@ export async function activate(context: vscode.ExtensionContext) {
             ['AIToolsOrganizer.newInstructionAtLocation', 'instructions'],
             ['AIToolsOrganizer.newPluginAtLocation', 'plugins'],
             ['AIToolsOrganizer.newPromptAtLocation', 'prompts'],
+            ['AIToolsOrganizer.newRuleAtLocation', 'rules'],
         ] as const).map(([cmdId, area]) =>
             vscode.commands.registerCommand(cmdId, async (item: AreaLocationTreeItem) => {
                 if (!item) { return; }
