@@ -96,7 +96,7 @@ export class GitHubSkillsClient {
                 } else {
                     const repo = repositories[i];
                     const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
-                    console.error(`Failed to fetch content from ${repo.owner}/${repo.repo}:`, result.reason);
+                    console.error(`Failed to fetch content from ${formatRepoLabel(repo)}:`, result.reason);
                     failures.push({ repo, error: message });
                 }
             }
@@ -162,7 +162,7 @@ export class GitHubSkillsClient {
                         }
                     }
                 } catch (err) {
-                    console.warn(`Failed to fetch subtree "${prefix}" in ${repo.owner}/${repo.repo}:`, err);
+                    console.warn(`Failed to fetch subtree "${prefix}" in ${formatRepoLabel(repo)}:`, err);
                 }
             })
         );

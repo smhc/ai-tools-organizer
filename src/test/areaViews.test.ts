@@ -314,6 +314,31 @@ suite('Area Views Test Suite', () => {
             assert.strictEqual(reviewItems.length, 1, 'review should appear exactly once');
             assert.ok(reviewItems[0].location.endsWith('review.agent.md'), 'review should resolve to .agent.md (higher priority)');
         });
+
+        test('deduplicates correctly even when lower-priority suffix appears first in filesystem order', async () => {
+            // Reverses the insertion order so review.agent.mdc comes before review.agent.md,
+            // simulating a filesystem that returns entries in a different order.
+            const reverseOrderDir: MockDirectory = {
+                type: 'directory',
+                children: {
+                    'review.agent.mdc': {
+                        type: 'file',
+                        content: '---\nname: review\ndescription: Duplicate agent\n---\nDuplicate.',
+                    },
+                    'review.agent.md': {
+                        type: 'file',
+                        content: '---\nname: review\ndescription: Code review agent\n---\nReview code.',
+                    },
+                },
+            };
+            const mockFs = buildMockFs('agents', reverseOrderDir);
+            const pathService = createTestPathService(mockFs, 'agents');
+            const provider = new InstalledAreaTreeDataProvider(mockContext, pathService, 'agents', 'AIToolsOrganizer.agents');
+            const items = await provider.scanInstalledItems();
+            const reviewItems = items.filter(i => i.name === 'review');
+            assert.strictEqual(reviewItems.length, 1, 'review should appear exactly once');
+            assert.ok(reviewItems[0].location.endsWith('review.agent.md'), 'review should resolve to .agent.md (higher priority) regardless of filesystem order');
+        });
     });
 
     // ─── Empty directory tests ───────────────────────────────────────────

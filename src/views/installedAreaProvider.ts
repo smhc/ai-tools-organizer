@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { InstalledSkill, normalizeSeparators, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea } from '../types';
+import { InstalledSkill, normalizeSeparators, ContentArea, AREA_DEFINITIONS, deriveItemName, fileMatchesArea, getAreaFileSuffixes } from '../types';
 import { SkillPathService } from '../services/skillPathService';
 import { DuplicateStatus, computeAllDuplicateStatuses, createLocationWatchers, FileInfo } from '../services/duplicateService';
 
@@ -421,25 +421,43 @@ export class InstalledAreaTreeDataProvider implements vscode.TreeDataProvider<Tr
         const fs = this.pathService.getFileSystem();
         const def = AREA_DEFINITIONS[this.area];
         const entries = await fs.readDirectory(dirUri);
-        // Track display names already emitted at this level to avoid duplicates when
-        // both foo.agent.md and foo.md are present (prefer the more-specific suffix).
-        const seenNames = new Set<string>();
+        const suffixes = getAreaFileSuffixes(def);
+
+        // Recurse into subdirectories first.
         for (const [name, type] of entries) {
             if (type === vscode.FileType.Directory) {
                 const subUri = vscode.Uri.joinPath(dirUri, name);
                 await this.scanSingleFiles(subUri, `${baseLoc}/${name}`, items);
-            } else if (type === vscode.FileType.File && fileMatchesArea(name, def)) {
-                const itemName = deriveItemName(name, def);
-                if (seenNames.has(itemName)) { continue; }
-                seenNames.add(itemName);
-                const normalizedLoc = normalizeSeparators(`${baseLoc}/${name}`);
-                items.push({
-                    name: itemName,
-                    description: '',
-                    location: normalizedLoc,
-                    installedAt: new Date().toISOString()
-                });
             }
+        }
+
+        // Collect all matching files at this level, then deduplicate by display name
+        // choosing the file whose suffix has the lowest index in the priority list.
+        // This avoids depending on filesystem-order to resolve suffix conflicts.
+        const candidates = new Map<string, string>(); // displayName → filename
+        for (const [name, type] of entries) {
+            if (type !== vscode.FileType.File || !fileMatchesArea(name, def)) { continue; }
+            const itemName = deriveItemName(name, def);
+            const existing = candidates.get(itemName);
+            if (!existing) {
+                candidates.set(itemName, name);
+            } else {
+                // Pick whichever filename's suffix appears earlier in the priority list.
+                const existingPriority = suffixes.findIndex(s => existing.endsWith(s));
+                const newPriority = suffixes.findIndex(s => name.endsWith(s));
+                if (newPriority !== -1 && (existingPriority === -1 || newPriority < existingPriority)) {
+                    candidates.set(itemName, name);
+                }
+            }
+        }
+
+        for (const [itemName, fileName] of candidates) {
+            items.push({
+                name: itemName,
+                description: '',
+                location: normalizeSeparators(`${baseLoc}/${fileName}`),
+                installedAt: new Date().toISOString()
+            });
         }
     }
 
