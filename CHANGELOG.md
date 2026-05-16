@@ -4,7 +4,19 @@ All notable changes to the "ai-tools-organizer" extension will be documented in 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
+## [0.3.1]
+
+### Added
+
+- **Cursor default install paths**: When the extension runs in Cursor (`vscode.env.appName`), unset per-area download defaults and `AIToolsOrganizer.installLocations` seeding now prefer `~/.cursor/<area>` (with existing exceptions for plugins at `~/.cursor/plugins/local` and rules at `~/.cursor/rules`) instead of `~/.copilot/...`. Other hosts keep the `~/.copilot/...` defaults.
+
+### Fixed
+
+- **`.github` in marketplace repos**: `.github` is back on the scoped subtree allowlist for Git tree discovery, so content under `.github/` (for example agents or nested plugin manifests) is fetched and shown again after it was omitted in 0.3.0.
+- **Installed single-file deduplication**: When two definition files in the same folder resolve to the same display name (for example `review.agent.md` and `review.agent.mdc`), the chosen file no longer depends on `readDirectory` order; the extension picks the filename whose suffix wins per the area’s configured priority list.
+- **Marketplace fetch logs (Azure DevOps)**: `GitHubSkillsClient` fetch failures and subtree warnings now log `formatRepoLabel(repo)` (for example `org/project/repo` on Azure DevOps) instead of a GitHub-style `owner/repo` string that omitted the project segment.
+
+## [0.3.0]
 
 ### Added
 

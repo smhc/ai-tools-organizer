@@ -189,10 +189,11 @@ export class SkillPathService {
      */
     async ensureInstallLocations(): Promise<void> {
         const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
-        const existing = config.get<Record<string, string>>('installLocations');
+        const existing = config.get<Record<string, string>>('installLocations') ?? {};
 
-        // If the setting already has entries, nothing to do
-        if (existing && Object.keys(existing).length > 0) {
+        // If the user (or workspace) already persisted any paths, do not overwrite.
+        // Empty `{}` from package.json defaults → seed per-IDE paths on first activation.
+        if (Object.keys(existing).length > 0) {
             return;
         }
 
