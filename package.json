@@ -2,7 +2,7 @@
   "name": "agent-organizer-cursor",
   "displayName": "AI Tools Organizer (Cursor)",
   "description": "AI Tools Organizer and Marketplace",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "icon": "resources/logo.png",
   "publisher": "smhc",
   "engines": {
@@ -1534,17 +1534,8 @@
         },
         "AIToolsOrganizer.installLocations": {
           "type": "object",
-          "default": {
-            "agents": "~/.copilot/agents",
-            "hooksGithub": "~/.copilot/hooks",
-            "hooksKiro": ".kiro/hooks",
-            "instructions": "~/.copilot/instructions",
-            "plugins": "~/.cursor/plugins/local",
-            "prompts": "~/.copilot/prompts",
-            "rules": "~/.cursor/rules",
-            "skills": "~/.copilot/skills"
-          },
-          "description": "Per-area default download locations. Keys are area identifiers (agents, hooksGithub, hooksKiro, instructions, plugins, prompts, rules, skills). Values are path strings.",
+          "default": {},
+          "description": "Per-area default download locations. Keys: agents, hooksGithub, hooksKiro, instructions, plugins, prompts, rules, skills. An empty object uses runtime defaults on first activation (Cursor vs other hosts differ; see SkillPathService.ensureInstallLocations).",
           "properties": {
             "agents": { "type": "string", "description": "Default download location for agents" },
             "hooksGithub": { "type": "string", "description": "Default download location for GitHub hooks" },

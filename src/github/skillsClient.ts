@@ -477,6 +477,21 @@ export class GitHubSkillsClient {
             }
         }
 
+        // GitHub-hosted agents: .github/agents/* when there is no top-level agents/ directory.
+        // (agents are conventionalOnly so the generic single-file fallback below is skipped)
+        if (result['agents'] === undefined) {
+            const agentDef = AREA_DEFINITIONS['agents'];
+            const suffixes = getAreaFileSuffixes(agentDef);
+            const hasGithubAgents = tree.some(item =>
+                item.type === 'blob' &&
+                item.path.startsWith('.github/agents/') &&
+                suffixes.some(s => item.path.endsWith(s))
+            );
+            if (hasGithubAgents) {
+                result['agents'] = '.github';
+            }
+        }
+
         // Step 2: For areas not yet found, search the merged subtree paths.
         // Conventional-only areas are skipped (hooksGithub / hooksKiro).
         const discoveredPrefixes = Object.values(result)
@@ -490,6 +505,14 @@ export class GitHubSkillsClient {
             if (def.conventionalOnly) { continue; }
 
             if (def.kind === 'multiFile' && def.definitionFile) {
+                if (area === 'plugins') {
+                    const hasMarketplace = tree.some(
+                        item => item.type === 'blob' && item.path === '.cursor-plugin/marketplace.json'
+                    );
+                    // Marketplace repos list plugins by manifest; do not treat sibling plugin folders
+                    // as the plugins area root (Step 3 assigns '.cursor-plugin/marketplace').
+                    if (hasMarketplace) { continue; }
+                }
                 const defFileSuffixes = [def.definitionFile, ...(def.alternateDefinitionFiles ?? [])];
                 const defFiles = tree.filter(item =>
                     item.type === 'blob' &&
@@ -538,17 +561,13 @@ export class GitHubSkillsClient {
             }
         }
 
-        // Step 3: Check for a Cursor marketplace manifest.
-        // The manifest presence is signalled by the file appearing in the merged tree
-        // (because .cursor-plugin is an interesting prefix) or by the earlier manifest probe
-        // in fetchMergedInterestingTree.
-        if (result['plugins'] === undefined) {
-            const hasMarketplace = tree.some(
-                item => item.type === 'blob' && item.path === '.cursor-plugin/marketplace.json'
-            );
-            if (hasMarketplace) {
-                result['plugins'] = '.cursor-plugin/marketplace';
-            }
+        // Step 3: Cursor marketplace manifest overrides a conventional plugins/ tree
+        // (same repo may list marketplace entries under pluginRoot while also having plugins/).
+        const hasMarketplace = tree.some(
+            item => item.type === 'blob' && item.path === '.cursor-plugin/marketplace.json'
+        );
+        if (hasMarketplace) {
+            result['plugins'] = '.cursor-plugin/marketplace';
         }
 
         return result;
