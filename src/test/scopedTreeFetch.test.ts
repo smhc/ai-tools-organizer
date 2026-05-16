@@ -69,7 +69,7 @@ suite('Scoped Tree Fetch — prefix allowlist', () => {
                 { path: 'skills', type: 'tree' },
                 { path: '.cursor', type: 'tree' },
                 { path: 'docs', type: 'tree' },        // not interesting
-                { path: '.github', type: 'tree' },     // excluded
+                { path: '.github', type: 'tree' },     // included as dot-tool dir
                 { path: 'node_modules', type: 'tree' },// not interesting
                 { path: 'README.md', type: 'blob' },
             ],
@@ -82,6 +82,9 @@ suite('Scoped Tree Fetch — prefix allowlist', () => {
                     { path: '.cursor/rules', type: 'tree' },
                     { path: '.cursor/rules/my-rule.mdc', type: 'blob' },
                 ],
+                '.github': [
+                    { path: '.github/copilot-instructions.md', type: 'blob' },
+                ],
             },
             files: {
                 'skills/my-skill/SKILL.md': '---\nname: My Skill\ndescription: desc\n---\nBody',
@@ -93,14 +96,14 @@ suite('Scoped Tree Fetch — prefix allowlist', () => {
 
         assert.ok(transport.fetchedSubtrees.includes('skills'), 'should fetch skills subtree');
         assert.ok(transport.fetchedSubtrees.includes('.cursor'), 'should fetch .cursor subtree');
+        assert.ok(transport.fetchedSubtrees.includes('.github'), 'should fetch .github subtree');
         assert.ok(!transport.fetchedSubtrees.includes('docs'), 'should NOT fetch docs subtree');
-        assert.ok(!transport.fetchedSubtrees.includes('.github'), 'should NOT fetch .github subtree');
         assert.ok(!transport.fetchedSubtrees.includes('node_modules'), 'should NOT fetch node_modules subtree');
 
         assert.strictEqual(areas['skills'], 'skills', 'skills area should be discovered');
     });
 
-    test('excludes .github even if it contains agent files', async () => {
+    test('discovers agents via .github when repo only has .github/agents/', async () => {
         const transport = new FakeRepoTransport({
             root: [
                 { path: '.github', type: 'tree' },
@@ -117,8 +120,8 @@ suite('Scoped Tree Fetch — prefix allowlist', () => {
         const client = buildClientWithFakeTransport(transport);
         const areas = await client.discoverAreas(REPO);
 
-        assert.ok(!transport.fetchedSubtrees.includes('.github'), '.github must not be fetched');
-        assert.strictEqual(areas['agents'], undefined, 'agents should not be discovered via .github');
+        assert.ok(transport.fetchedSubtrees.includes('.github'), '.github should be fetched');
+        assert.strictEqual(areas['agents'], '.github', 'agents should be discovered via .github');
     });
 });
 

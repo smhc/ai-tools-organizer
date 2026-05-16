@@ -33,7 +33,7 @@ export const AWESOME_COPILOT_TREE: { tree: GitHubTreeItem[] } = {
         { path: 'agents/github-actions-expert.agent.md', mode: '100644', type: 'blob', sha: '9ad33d99', size: 5482, url: '' },
         { path: 'agents/plan.agent.md', mode: '100644', type: 'blob', sha: '4d7252c4', size: 6774, url: '' },
         { path: 'agents/terraform.agent.md', mode: '100644', type: 'blob', sha: 'e9732f6b', size: 14365, url: '' },
-        // Agent under .github/agents (should NOT be discovered — .github is not a conventional agents dir)
+        // Agent under .github/agents (discoverable via .github dot-tool dir scan)
         { path: '.github/agents/agentic-workflows.agent.md', mode: '100644', type: 'blob', sha: '768e998f', size: 8446, url: '' },
 
         // --- Hooks - GitHub (multi-file: folders with hooks.json) ---
