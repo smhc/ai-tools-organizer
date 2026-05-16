@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- **Cursor default install paths**: When the extension runs in Cursor (`vscode.env.appName`), unset per-area download defaults and `AIToolsOrganizer.installLocations` seeding now prefer `~/.cursor/<area>` (with existing exceptions for plugins at `~/.cursor/plugins/local` and rules at `~/.cursor/rules`) instead of `~/.copilot/...`. Other hosts keep the `~/.copilot/...` defaults.
+- **Cursor default install paths**: When the extension runs in Cursor (`vscode.env.appName`), per-area download defaults and first-time `AIToolsOrganizer.installLocations` seeding (only when that setting is still empty) now use `~/.cursor/<area>` (with existing exceptions for plugins at `~/.cursor/plugins/local` and rules at `~/.cursor/rules`) instead of `~/.copilot/...`. Other hosts keep the `~/.copilot/...` defaults.
 
 ### Fixed
 
