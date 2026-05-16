@@ -2,7 +2,7 @@
   "name": "agent-organizer-cursor",
   "displayName": "AI Tools Organizer (Cursor)",
   "description": "AI Tools Organizer and Marketplace",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "icon": "resources/logo.png",
   "publisher": "smhc",
   "engines": {
@@ -1508,7 +1508,7 @@
         "AIToolsOrganizer.skillRepositories": {
           "type": "array",
           "default": [],
-          "markdownDescription": "Repositories to fetch content from. Supports **GitHub** and **Azure DevOps** repositories. Use the **Add Repository** button in the Marketplace view to add repos from a URL.\n\n- GitHub: `{ \"owner\": \"...\", \"repo\": \"...\", \"branch\": \"main\" }`\n- Azure DevOps: `{ \"owner\": \"org\", \"project\": \"project\", \"repo\": \"repo\", \"branch\": \"main\" }`",
+          "markdownDescription": "Repositories to fetch content from. Supports **GitHub** and **Azure DevOps** repositories. Use the **Add Repository** button in the Marketplace view to add repos from a URL.\n\n- GitHub: `{ \"owner\": \"...\", \"repo\": \"...\", \"branch\": \"main\", \"repositoryUrl\": \"https://github.com/...\" }`\n- Azure DevOps: `{ \"owner\": \"org\", \"project\": \"project\", \"repo\": \"repo\", \"branch\": \"main\", \"repositoryUrl\": \"https://dev.azure.com/...\" }` — if `repositoryUrl` is a `dev.azure.com` / `*.visualstudio.com` Git URL, the Azure DevOps transport is used even when `project` is missing.",
           "items": {
             "type": "object",
             "properties": {
@@ -1528,6 +1528,10 @@
               "project": {
                 "type": "string",
                 "description": "Azure DevOps project name (set this to use an Azure DevOps repository instead of GitHub)"
+              },
+              "repositoryUrl": {
+                "type": "string",
+                "description": "Canonical repo URL without credentials (set automatically when adding via URL). Used to detect Azure DevOps when project is missing from settings."
               }
             }
           }

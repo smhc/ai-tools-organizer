@@ -13,7 +13,7 @@
  */
 
 import * as vscode from 'vscode';
-import { SkillRepository, CacheEntry } from '../types';
+import { SkillRepository, CacheEntry, isAdoRepository } from '../types';
 import { RepoTransport, RepoTreeItem } from './repoTransport';
 
 interface AdoItemEntry {
@@ -31,6 +31,40 @@ interface AdoRepoInfo {
 }
 
 const ADO_API_VERSION = '7.1';
+
+/**
+ * PAT from `AIToolsOrganizer.azureDevOpsPat`, else `AZURE_DEVOPS_EXT_PAT` (trimmed).
+ * Exported for proactive checks before batch ADO fetches.
+ */
+export function getResolvedAzureDevOpsPat(): string {
+    const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
+    const fromSettings = (config.get<string>('azureDevOpsPat', '') || '').trim();
+    if (fromSettings) {
+        return fromSettings;
+    }
+    return (process.env.AZURE_DEVOPS_EXT_PAT || '').trim();
+}
+
+/**
+ * When any configured repo is Azure DevOps and no PAT is available, show one actionable error.
+ * (Still allows fetch to proceed for anonymously readable projects.)
+ */
+export function notifyAzureDevOpsPatMissingIfNeeded(repositories: SkillRepository[]): void {
+    if (!repositories.length || !repositories.some(r => isAdoRepository(r)) || getResolvedAzureDevOpsPat()) {
+        return;
+    }
+    void vscode.window.showErrorMessage(
+        'Azure DevOps marketplace sources need a Personal Access Token, but none is configured. ' +
+        'Set AIToolsOrganizer.azureDevOpsPat in User Settings (PATs are stored with application scope), ' +
+        'or set the AZURE_DEVOPS_EXT_PAT environment variable and fully restart Cursor so the host picks it up. ' +
+        'In Azure DevOps, create a PAT with Code (read) (and access to the organization that hosts the repo).',
+        'Open PAT setting'
+    ).then(choice => {
+        if (choice === 'Open PAT setting') {
+            void vscode.commands.executeCommand('workbench.action.openSettings', 'AIToolsOrganizer.azureDevOpsPat');
+        }
+    });
+}
 
 export class AzureDevOpsRepoTransport implements RepoTransport {
     constructor(private readonly cache: Map<string, CacheEntry<unknown>>) {}
@@ -58,10 +92,12 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
 
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
-                vscode.window.showErrorMessage(
-                    `Azure DevOps authentication failed (${response.status}). ` +
-                    'Set a Personal Access Token with Code (read) permission in AIToolsOrganizer.azureDevOpsPat or the AZURE_DEVOPS_EXT_PAT environment variable.'
-                );
+                if (getResolvedAzureDevOpsPat()) {
+                    vscode.window.showErrorMessage(
+                        `Azure DevOps authentication failed (${response.status}). ` +
+                        'Verify your PAT has Code (read) scope, or try a new token in AIToolsOrganizer.azureDevOpsPat / AZURE_DEVOPS_EXT_PAT.'
+                    );
+                }
             }
             if (response.status === 404) {
                 throw new Error(`Azure DevOps repository or branch not found: ${repo.owner}/${repo.project}/${repo.repo}@${branch}`);
@@ -102,10 +138,12 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
                 return [];
             }
             if (response.status === 401 || response.status === 403) {
-                vscode.window.showErrorMessage(
-                    `Azure DevOps authentication failed (${response.status}). ` +
-                    'Check AIToolsOrganizer.azureDevOpsPat or the AZURE_DEVOPS_EXT_PAT environment variable.'
-                );
+                if (getResolvedAzureDevOpsPat()) {
+                    vscode.window.showErrorMessage(
+                        `Azure DevOps authentication failed (${response.status}). ` +
+                        'Verify your PAT has Code (read) scope, or try a new token in AIToolsOrganizer.azureDevOpsPat / AZURE_DEVOPS_EXT_PAT.'
+                    );
+                }
             }
             throw new Error(`Azure DevOps API error fetching subtree ${prefixPath}: ${response.status} ${response.statusText}`);
         }
@@ -154,10 +192,12 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
 
         if (!response.ok) {
             if (response.status === 401 || response.status === 403) {
-                vscode.window.showErrorMessage(
-                    `Azure DevOps authentication failed (${response.status}). ` +
-                    'Check AIToolsOrganizer.azureDevOpsPat or the AZURE_DEVOPS_EXT_PAT environment variable.'
-                );
+                if (getResolvedAzureDevOpsPat()) {
+                    vscode.window.showErrorMessage(
+                        `Azure DevOps authentication failed (${response.status}). ` +
+                        'Verify your PAT has Code (read) scope, or try a new token in AIToolsOrganizer.azureDevOpsPat / AZURE_DEVOPS_EXT_PAT.'
+                    );
+                }
             }
             throw new Error(`Failed to fetch file from Azure DevOps: ${response.status}`);
         }
@@ -191,20 +231,8 @@ export class AzureDevOpsRepoTransport implements RepoTransport {
         return `https://dev.azure.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.project!)}`;
     }
 
-    /**
-     * PAT resolution: user setting first, then AZURE_DEVOPS_EXT_PAT (e.g. CI or shell profile).
-     */
-    private getAzureDevOpsPat(): string {
-        const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
-        const fromSettings = (config.get<string>('azureDevOpsPat', '') || '').trim();
-        if (fromSettings) {
-            return fromSettings;
-        }
-        return (process.env.AZURE_DEVOPS_EXT_PAT || '').trim();
-    }
-
     private async fetchWithAuth(url: string, accept = 'application/json'): Promise<Response> {
-        const pat = this.getAzureDevOpsPat();
+        const pat = getResolvedAzureDevOpsPat();
 
         const headers: Record<string, string> = {
             'Accept': accept,

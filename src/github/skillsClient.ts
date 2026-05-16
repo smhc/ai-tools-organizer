@@ -26,7 +26,7 @@ import * as vscode from 'vscode';
 import { Skill, SkillRepository, SkillMetadata, CacheEntry, FailedRepository, readRepositoriesConfig, ContentArea, ALL_CONTENT_AREAS, AREA_DEFINITIONS, AreaFileItem, RepoContent, AreaPaths, isYamlBlockScalar, stripYamlQuotes, collectBlockScalarValue, getAreaFileSuffixes, deriveItemName, isAdoRepository, formatRepoLabel } from '../types';
 import { RepoTransport, RepoTreeItem } from '../repos/repoTransport';
 import { GitHubRepoTransport } from '../repos/githubRepoTransport';
-import { AzureDevOpsRepoTransport } from '../repos/azureDevOpsRepoTransport';
+import { AzureDevOpsRepoTransport, notifyAzureDevOpsPatMissingIfNeeded } from '../repos/azureDevOpsRepoTransport';
 
 /**
  * Fixed dot-tooling root directories that are always included in the interesting-prefix
@@ -59,6 +59,21 @@ export class GitHubSkillsClient {
         this.adoTransport = new AzureDevOpsRepoTransport(this.cache);
     }
 
+    /**
+     * Normalize paths declared in marketplace.json (strip leading `./`, trim slashes,
+     * accept backslashes) so subtree prefixes and Git/ADO file paths are valid.
+     */
+    private normalizeRepoRelativePath(raw: string): string {
+        let s = raw.trim().replace(/\\/g, '/');
+        while (s.startsWith('./')) {
+            s = s.slice(2);
+        }
+        while (s.startsWith('/')) {
+            s = s.slice(1);
+        }
+        return s.replace(/\/+/g, '/').replace(/\/+$/, '');
+    }
+
     /** Select the correct transport for a repository. */
     private transport(repo: SkillRepository): RepoTransport {
         return isAdoRepository(repo) ? this.adoTransport : this.ghTransport;
@@ -80,6 +95,8 @@ export class GitHubSkillsClient {
             location: vscode.ProgressLocation.Window,
             title: 'Fetching content...',
         }, async (progress) => {
+            notifyAzureDevOpsPatMissingIfNeeded(repositories);
+
             const results = await Promise.allSettled(
                 repositories.map(async (repo) => {
                     progress.report({ message: formatRepoLabel(repo) });
@@ -208,7 +225,9 @@ export class GitHubSkillsClient {
                     ? (e['source'] as Record<string, unknown>)['path'] as string
                     : '');
             if (!rawSource || rawSource.includes('..')) { continue; }
-            const pluginDir = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
+            const combined = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
+            const pluginDir = this.normalizeRepoRelativePath(combined);
+            if (!pluginDir || pluginDir.includes('..')) { continue; }
             dirs.push(pluginDir);
         }
         return dirs;
@@ -775,7 +794,9 @@ export class GitHubSkillsClient {
                     ? (e['source'] as Record<string, unknown>)['path'] as string
                     : '');
             if (!rawSource || rawSource.includes('..')) { continue; }
-            const pluginDir = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
+            const combined = globalPrefix ? `${globalPrefix}/${rawSource}` : rawSource;
+            const pluginDir = this.normalizeRepoRelativePath(combined);
+            if (!pluginDir || pluginDir.includes('..')) { continue; }
 
             if (otherPrefixes.some(p => pluginDir.startsWith(p))) { continue; }
 
