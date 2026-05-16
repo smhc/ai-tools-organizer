@@ -68,6 +68,61 @@ export const AWESOME_COPILOT_TREE: { tree: GitHubTreeItem[] } = {
     ]
 };
 
+// ─── Cursor-style tree: .cursor-plugin/plugin.json and rules/*.mdc ────────────
+
+/**
+ * Mock tree for a repo that uses:
+ *   - .cursor-plugin/plugin.json  (single plugin, no top-level plugins/ dir)
+ *   - rules/                      (*.mdc rules)
+ *   - agents/ with .mdc suffix
+ */
+export const CURSOR_STYLE_TREE: { tree: GitHubTreeItem[] } = {
+    tree: [
+        { path: '.cursor-plugin', mode: '040000', type: 'tree', sha: 'aaa00001', url: '' },
+        { path: '.cursor-plugin/plugin.json', mode: '100644', type: 'blob', sha: 'aaa00002', size: 200, url: '' },
+        { path: 'agents', mode: '040000', type: 'tree', sha: 'aaa00003', url: '' },
+        { path: 'agents/reviewer.mdc', mode: '100644', type: 'blob', sha: 'aaa00004', size: 300, url: '' },
+        { path: 'rules', mode: '040000', type: 'tree', sha: 'aaa00005', url: '' },
+        { path: 'rules/prefer-const.mdc', mode: '100644', type: 'blob', sha: 'aaa00006', size: 150, url: '' },
+        { path: 'rules/no-any.mdc', mode: '100644', type: 'blob', sha: 'aaa00007', size: 120, url: '' },
+    ]
+};
+
+/**
+ * Expected area discovery for CURSOR_STYLE_TREE.
+ */
+export const EXPECTED_CURSOR_AREA_PATHS = {
+    agents: 'agents',
+    plugins: '.cursor-plugin/marketplace', // sentinel for single-plugin Cursor layout; fetchRepoContent handles it
+    rules: 'rules',
+};
+
+// ─── Cursor marketplace tree: .cursor-plugin/marketplace.json ─────────────────
+
+/**
+ * Mock tree for a multi-plugin repo using a Cursor marketplace manifest.
+ */
+export const CURSOR_MARKETPLACE_TREE: { tree: GitHubTreeItem[] } = {
+    tree: [
+        { path: '.cursor-plugin', mode: '040000', type: 'tree', sha: 'bbb00001', url: '' },
+        { path: '.cursor-plugin/marketplace.json', mode: '100644', type: 'blob', sha: 'bbb00002', size: 500, url: '' },
+        { path: 'my-plugin', mode: '040000', type: 'tree', sha: 'bbb00003', url: '' },
+        { path: 'my-plugin/.cursor-plugin', mode: '040000', type: 'tree', sha: 'bbb00004', url: '' },
+        { path: 'my-plugin/.cursor-plugin/plugin.json', mode: '100644', type: 'blob', sha: 'bbb00005', size: 200, url: '' },
+        { path: 'my-plugin/skills', mode: '040000', type: 'tree', sha: 'bbb00006', url: '' },
+        { path: 'my-plugin/skills/my-skill/SKILL.md', mode: '100644', type: 'blob', sha: 'bbb00007', size: 300, url: '' },
+        { path: 'another-plugin', mode: '040000', type: 'tree', sha: 'bbb00008', url: '' },
+        { path: 'another-plugin/.cursor-plugin', mode: '040000', type: 'tree', sha: 'bbb00009', url: '' },
+        { path: 'another-plugin/.cursor-plugin/plugin.json', mode: '100644', type: 'blob', sha: 'bbb00010', size: 200, url: '' },
+    ]
+};
+
+export const CURSOR_MARKETPLACE_REPO = {
+    owner: 'test-org',
+    repo: 'cursor-plugins',
+    branch: 'main'
+};
+
 /**
  * Expected area discovery result for the mock tree above.
  */

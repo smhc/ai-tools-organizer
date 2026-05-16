@@ -18,6 +18,7 @@ const AREA_CONFIG_KEYS: Partial<Record<ContentArea, string>> = {
     instructions: 'chat.instructionsFilesLocations',
     plugins: 'chat.pluginLocations',
     prompts: 'chat.promptFilesLocations',
+    // rules: no VS Code/Cursor chat.* setting exists yet for rule file locations
     skills: 'chat.agentSkillsLocations',
 };
 
@@ -28,11 +29,13 @@ const AREA_CONFIG_KEYS: Partial<Record<ContentArea, string>> = {
 const DEFAULT_LOCATION_PREFIXES = [
     '.agents',
     '.claude',
+    '.cursor',
     '.github',
     '.kiro',
     '~/.agents',
     '~/.claude',
     '~/.copilot',
+    '~/.cursor',
     '~/.kiro',
 ];
 
@@ -47,7 +50,19 @@ const AREA_DIR_NAMES: Record<ContentArea, string> = {
     plugins: 'plugins',
     powers: 'powers',
     prompts: 'prompts',
+    rules: 'rules',
     skills: 'skills',
+};
+
+/**
+ * Areas with a Cursor-specific install root that differs from the generic
+ * `~/.cursor/<dirName>` pattern produced by the default prefix list.
+ * Values are appended (deduped) to whatever the config or default list produces.
+ */
+const CURSOR_EXTRA_LOCATIONS: Partial<Record<ContentArea, string[]>> = {
+    // Cursor user plugins are installed under ~/.cursor/plugins/local/<plugin-name>
+    // The scan parent must be "local", not "plugins", to avoid treating "local" itself as a plugin.
+    plugins: ['~/.cursor/plugins/local'],
 };
 
 export class SkillPathService {
@@ -106,7 +121,19 @@ export class SkillPathService {
 
         // Build default list from template prefixes
         const dirName = AREA_DIR_NAMES[area];
-        return DEFAULT_LOCATION_PREFIXES.map(prefix => `${prefix}/${dirName}`);
+        const defaults = DEFAULT_LOCATION_PREFIXES.map(prefix => `${prefix}/${dirName}`);
+
+        // Append any Cursor-specific extra locations (deduped)
+        const extras = CURSOR_EXTRA_LOCATIONS[area];
+        if (extras) {
+            for (const extra of extras) {
+                if (!defaults.includes(extra)) {
+                    defaults.push(extra);
+                }
+            }
+        }
+
+        return defaults;
     }
 
     /**
@@ -123,6 +150,14 @@ export class SkillPathService {
         const locations = config.get<Record<string, string>>('installLocations');
         if (locations && locations[area]) {
             return locations[area];
+        }
+
+        // Cursor-native areas use their own install roots rather than ~/.copilot
+        if (area === 'plugins') {
+            return '~/.cursor/plugins/local';
+        }
+        if (area === 'rules') {
+            return '~/.cursor/rules';
         }
 
         // Fallback: ~/.copilot/{area}
@@ -153,11 +188,15 @@ export class SkillPathService {
             return;
         }
 
-        // Build defaults: ~/.copilot/{area} for each area (hooksKiro is fixed to .kiro/hooks)
+        // Build defaults per area. Most use ~/.copilot/{dirName}; some use Cursor-native paths.
         const defaults: Record<string, string> = {};
         for (const area of ALL_CONTENT_AREAS) {
             if (area === 'hooksKiro') {
                 defaults[area] = '.kiro/hooks';
+            } else if (area === 'plugins') {
+                defaults[area] = '~/.cursor/plugins/local';
+            } else if (area === 'rules') {
+                defaults[area] = '~/.cursor/rules';
             } else {
                 const dirName = AREA_DIR_NAMES[area];
                 defaults[area] = `~/.copilot/${dirName}`;

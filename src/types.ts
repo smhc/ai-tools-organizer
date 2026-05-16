@@ -8,12 +8,12 @@ import * as vscode from 'vscode';
  * The recognized content areas in a repository.
  * Each area has its own detection pattern and display behavior.
  */
-export type ContentArea = 'agents' | 'hooksGithub' | 'hooksKiro' | 'instructions' | 'plugins' | 'powers' | 'prompts' | 'skills';
+export type ContentArea = 'agents' | 'hooksGithub' | 'hooksKiro' | 'instructions' | 'plugins' | 'powers' | 'prompts' | 'rules' | 'skills';
 
 /**
  * All recognized content areas in display order.
  */
-export const ALL_CONTENT_AREAS: ContentArea[] = ['agents', 'hooksGithub', 'hooksKiro', 'instructions', 'plugins', 'prompts', 'skills'];
+export const ALL_CONTENT_AREAS: ContentArea[] = ['agents', 'hooksGithub', 'hooksKiro', 'instructions', 'plugins', 'prompts', 'rules', 'skills'];
 
 /**
  * Metadata about each content area: how to detect it and what files define items.
@@ -25,10 +25,27 @@ export interface AreaDefinition {
     groupIcon: string;
     /** Whether items are single files or multi-file folders */
     kind: 'singleFile' | 'multiFile';
-    /** For singleFile areas: glob-like suffix to match (e.g. '.agent.md') */
+    /**
+     * For singleFile areas: the primary suffix to match (e.g. '.agent.md').
+     * Used as the scaffold default and kept for backward-compatibility.
+     * When `fileSuffixes` is also present, `fileSuffixes` drives matching and
+     * `fileSuffix` is used only when creating new items.
+     */
     fileSuffix?: string;
-    /** For multiFile areas: the definition file that must exist at the folder root */
+    /**
+     * For singleFile areas: all accepted suffixes in priority order.
+     * The first matching suffix is stripped to derive the display name.
+     * When absent, falls back to `fileSuffix`.
+     */
+    fileSuffixes?: string[];
+    /** For multiFile areas: the primary definition file (e.g. 'plugin.json', 'SKILL.md') */
     definitionFile?: string;
+    /**
+     * For multiFile areas: additional definition file paths to try when `definitionFile`
+     * is not present at the folder root. Tried in order after `definitionFile`.
+     * Paths may include subdirectories (e.g. '.cursor-plugin/plugin.json').
+     */
+    alternateDefinitionFiles?: string[];
     /** If true, only discover via conventional top-level directory name (skip fallback search) */
     conventionalOnly?: boolean;
     /** Override the icon file prefix (defaults to the area key). Used when two areas share icons. */
@@ -38,15 +55,81 @@ export interface AreaDefinition {
 }
 
 export const AREA_DEFINITIONS: Record<ContentArea, AreaDefinition> = {
-    agents: { label: 'Agents', groupIcon: 'hubot', kind: 'singleFile', fileSuffix: '.agent.md' },
+    agents: {
+        label: 'Agents',
+        groupIcon: 'hubot',
+        kind: 'singleFile',
+        fileSuffix: '.agent.md',
+        // Cursor also accepts bare .md, .mdc, .markdown for agents
+        fileSuffixes: ['.agent.md', '.agent.mdc', '.mdc', '.md', '.markdown'],
+        // Suffixes are too generic (.md) to safely discover outside a conventional agents/ dir
+        conventionalOnly: true,
+    },
     hooksGithub: { label: 'Hooks - GitHub', groupIcon: 'git-commit', kind: 'multiFile', definitionFile: 'hooks.json', conventionalOnly: true, iconPrefix: 'hooks', conventionalDir: 'hooks' },
     hooksKiro: { label: 'Hooks - Kiro', groupIcon: 'git-commit', kind: 'singleFile', fileSuffix: '.json', conventionalOnly: true, iconPrefix: 'hooks', conventionalDir: 'hooks' },
     instructions: { label: 'Instructions', groupIcon: 'note', kind: 'singleFile', fileSuffix: '.instructions.md' },
-    plugins: { label: 'Plugins', groupIcon: 'plug', kind: 'multiFile', definitionFile: 'plugin.json' },
+    plugins: {
+        label: 'Plugins',
+        groupIcon: 'plug',
+        kind: 'multiFile',
+        definitionFile: 'plugin.json',
+        // Cursor's canonical manifest lives under .cursor-plugin/
+        alternateDefinitionFiles: ['.cursor-plugin/plugin.json'],
+    },
     powers: { label: 'Powers', groupIcon: 'zap', kind: 'multiFile', definitionFile: 'POWER.md' },
-    prompts: { label: 'Prompts / Commands', groupIcon: 'comment-discussion', kind: 'singleFile', fileSuffix: '.prompt.md' },
+    prompts: {
+        label: 'Prompts / Commands',
+        groupIcon: 'comment-discussion',
+        kind: 'singleFile',
+        fileSuffix: '.prompt.md',
+        // Cursor also accepts bare .md, .mdc, .markdown, .txt for commands
+        fileSuffixes: ['.prompt.md', '.prompt.mdc', '.mdc', '.md', '.markdown', '.txt'],
+        // Suffixes are too generic (.md, .txt) to safely discover outside a conventional prompts/ dir
+        conventionalOnly: true,
+    },
+    rules: {
+        label: 'Rules',
+        groupIcon: 'law',
+        kind: 'singleFile',
+        fileSuffix: '.mdc',
+        fileSuffixes: ['.mdc', '.md', '.markdown'],
+        conventionalDir: 'rules',
+        // Suffixes are too generic (.md, .mdc) to safely discover outside a conventional rules/ dir
+        conventionalOnly: true,
+    },
     skills: { label: 'Skills', groupIcon: 'package', kind: 'multiFile', definitionFile: 'SKILL.md' },
 };
+
+/**
+ * Return the effective list of suffixes for a singleFile area definition.
+ * Prefers `fileSuffixes` when present, otherwise wraps `fileSuffix`.
+ */
+export function getAreaFileSuffixes(def: AreaDefinition): string[] {
+    if (def.fileSuffixes && def.fileSuffixes.length > 0) {
+        return def.fileSuffixes;
+    }
+    return def.fileSuffix ? [def.fileSuffix] : [];
+}
+
+/**
+ * Derive the display name from a filename by stripping the first matching suffix
+ * from the area's suffix list. Returns the full filename when no suffix matches.
+ */
+export function deriveItemName(fileName: string, def: AreaDefinition): string {
+    for (const suffix of getAreaFileSuffixes(def)) {
+        if (fileName.endsWith(suffix)) {
+            return fileName.slice(0, fileName.length - suffix.length);
+        }
+    }
+    return fileName;
+}
+
+/**
+ * Return true if the filename matches any suffix in the area's suffix list.
+ */
+export function fileMatchesArea(fileName: string, def: AreaDefinition): boolean {
+    return getAreaFileSuffixes(def).some(s => fileName.endsWith(s));
+}
 
 /**
  * Paths object mapping each content area to its path within the repository.
@@ -57,11 +140,21 @@ export type AreaPaths = Partial<Record<ContentArea, string>>;
 
 /**
  * Configuration for a repository source.
+ * When `project` is set the repository is hosted on Azure DevOps
+ * (owner = organization, project = ADO project name).
+ * When `project` is absent the repository is on GitHub.
  */
 export interface SkillRepository {
     owner: string;
     repo: string;
     branch: string;
+    /** Azure DevOps project name. Present only for ADO repos. */
+    project?: string;
+}
+
+/** Returns true when the repository is an Azure DevOps repo. */
+export function isAdoRepository(repo: SkillRepository): boolean {
+    return typeof repo.project === 'string' && repo.project.length > 0;
 }
 
 /**
@@ -273,12 +366,13 @@ export function collectBlockScalarValue(lines: string[], startIndex: number, ind
 
 /**
  * Compare two SkillRepository configs for identity equality.
- * Compares owner, repo, and branch.
+ * Compares owner, repo, branch, and (for ADO repos) project.
  */
 export function isSameRepository(left: SkillRepository, right: SkillRepository): boolean {
     return left.owner === right.owner &&
         left.repo === right.repo &&
-        left.branch === right.branch;
+        left.branch === right.branch &&
+        (left.project || '') === (right.project || '');
 }
 
 /**
@@ -291,6 +385,7 @@ export function normalizeSeparators(location: string): string {
 
 /**
  * Build a GitHub URL for a skill or repository path.
+ * @deprecated Use buildRepoWebUrl instead.
  */
 export function buildGitHubUrl(owner: string, repo: string, branch: string, skillPath: string): string {
     const safeBranch = encodeURIComponent(branch);
@@ -299,14 +394,54 @@ export function buildGitHubUrl(owner: string, repo: string, branch: string, skil
 }
 
 /**
+ * Build a web browser URL for a repository path, handling both GitHub and Azure DevOps.
+ * @param repo  Source repository config.
+ * @param opts  `kind`: whether to link to a tree (directory) or blob (file).
+ *              `path`: the path within the repo (empty string for repo root).
+ */
+export function buildRepoWebUrl(repo: SkillRepository, opts: { kind: 'tree' | 'blob'; path: string }): string {
+    const { kind, path } = opts;
+    if (isAdoRepository(repo)) {
+        const base = `https://dev.azure.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.project!)}/_git/${encodeURIComponent(repo.repo)}`;
+        const params = new URLSearchParams();
+        if (path) { params.set('path', path.startsWith('/') ? path : `/${path}`); }
+        params.set('version', `GB${repo.branch}`);
+        return `${base}?${params.toString()}`;
+    }
+    const safeBranch = encodeURIComponent(repo.branch);
+    const safePath = path.split('/').map(encodeURIComponent).join('/');
+    if (kind === 'blob') {
+        return `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/blob/${safeBranch}/${safePath}`;
+    }
+    return `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/tree/${safeBranch}/${safePath}`;
+}
+
+/**
+ * Return a concise human-readable label for a repository.
+ * GitHub: "owner/repo"
+ * Azure DevOps: "owner/project/repo"
+ */
+export function formatRepoLabel(repo: SkillRepository): string {
+    if (isAdoRepository(repo)) {
+        return `${repo.owner}/${repo.project}/${repo.repo}`;
+    }
+    return `${repo.owner}/${repo.repo}`;
+}
+
+/**
  * Normalize a SkillRepository read from user config.
  * Ensures branch defaults to 'main' when omitted.
  */
 export function normalizeRepository(repo: SkillRepository): SkillRepository {
-    return {
+    const normalized: SkillRepository = {
         ...repo,
         branch: repo.branch || 'main'
     };
+    // Remove project when empty so ADO discriminator stays clean
+    if (normalized.project !== undefined && normalized.project.length === 0) {
+        delete normalized.project;
+    }
+    return normalized;
 }
 
 /**
@@ -350,6 +485,10 @@ export function readRepositoriesConfig(): SkillRepository[] {
  */
 export async function writeRepositoriesConfig(repos: SkillRepository[]): Promise<void> {
     const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
-    const normalized = repos.map(r => ({ owner: r.owner, repo: r.repo, branch: r.branch || 'main' }));
+    const normalized = repos.map(r => {
+        const entry: Record<string, string> = { owner: r.owner, repo: r.repo, branch: r.branch || 'main' };
+        if (r.project) { entry['project'] = r.project; }
+        return entry;
+    });
     await config.update('skillRepositories', normalized, vscode.ConfigurationTarget.Global);
 }
