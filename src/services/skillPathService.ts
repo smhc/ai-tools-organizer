@@ -133,6 +133,12 @@ export class SkillPathService {
             }
         }
 
+        // Under ~/.cursor/plugins, real user plugins live in the `local` subdirectory.
+        // Treating `~/.cursor/plugins` as a scan root mis-classifies `local` as a plugin folder.
+        if (area === 'plugins') {
+            return defaults.filter(p => p !== '~/.cursor/plugins' && p !== '.cursor/plugins');
+        }
+
         return defaults;
     }
 
