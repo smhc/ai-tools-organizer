@@ -237,6 +237,40 @@ suite('Scoped Tree Fetch — .cursor-plugin marketplace', () => {
         assert.strictEqual(areas['plugins'], '.cursor-plugin/marketplace');
     });
 
+    test('marketplace source with ./ prefix maps to real subtree root (not ".")', async () => {
+        const marketplaceJson = JSON.stringify({
+            plugins: [
+                { name: 'Demo', source: './plugins/encompass-demo/' },
+            ],
+        });
+
+        const transport = new FakeRepoTransport({
+            root: [
+                { path: '.cursor-plugin', type: 'tree' },
+                { path: 'plugins', type: 'tree' },
+            ],
+            subtrees: {
+                '.cursor-plugin': [
+                    { path: '.cursor-plugin/marketplace.json', type: 'blob' },
+                ],
+                plugins: [
+                    { path: 'plugins/encompass-demo', type: 'tree' },
+                    { path: 'plugins/encompass-demo/.cursor-plugin/plugin.json', type: 'blob' },
+                ],
+            },
+            files: {
+                '.cursor-plugin/marketplace.json': marketplaceJson,
+                'plugins/encompass-demo/.cursor-plugin/plugin.json': JSON.stringify({ name: 'Demo', description: 'D' }),
+            },
+        });
+
+        const client = buildClientWithFakeTransport(transport);
+        await client.discoverAreas(REPO);
+
+        assert.ok(transport.fetchedSubtrees.includes('plugins'), 'should fetch plugins subtree');
+        assert.ok(!transport.fetchedSubtrees.includes('.'), 'must not treat ./... as a "." subtree scope');
+    });
+
     test('marketplace with no manifest file sets no plugins area', async () => {
         const transport = new FakeRepoTransport({
             root: [

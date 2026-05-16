@@ -4,6 +4,24 @@ All notable changes to the "ai-tools-organizer" extension will be documented in 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.3.2]
+
+### Added
+
+- **`repositoryUrl` on marketplace sources**: Adding a repository from a URL now stores a canonical `repositoryUrl` (credentials stripped). Settings and docs describe how it is used for Azure DevOps detection.
+- **Azure DevOps identity from URL**: When `repositoryUrl` is a `dev.azure.com` or `*.visualstudio.com` `/_git/` URL, the extension restores `owner`, `project`, and `repo` from that URL if they are missing or incomplete in stored settings, so the Azure DevOps transport is still selected even when the `project` field was dropped by sync or manual edits.
+- **PAT guidance before ADO add**: Adding an Azure DevOps repository without a configured PAT shows an actionable error with a shortcut to open `AIToolsOrganizer.azureDevOpsPat`.
+- **PAT reminder on marketplace load**: If any configured source is Azure DevOps and no PAT is available, a single error explains settings vs `AZURE_DEVOPS_EXT_PAT` and offers to open the PAT setting.
+
+### Changed
+
+- **Azure DevOps URL parsing**: `parseAzureDevOpsGitUrl` and credential stripping live in `src/git/azureDevOpsUrl.ts` for reuse across the extension and repository resolution.
+- **`.cursor-plugin` marketplace paths**: Plugin directory paths from `marketplace.json` normalize leading `./` (and similar) so declared subtrees such as `./plugins/...` fetch the correct prefix instead of being treated as a repository-root scope.
+
+### Fixed
+
+- **Azure DevOps auth errors**: When a PAT is configured but rejected (401/403), the error message now only suggests token problems instead of implying no PAT was set.
+
 ## [0.3.1]
 
 ### Added

@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import { Skill, FailedRepository, SkillRepository, isSameRepository, readRepositoriesConfig, ContentArea, AREA_DEFINITIONS, AreaFileItem, formatRepoLabel } from '../types';
+import { notifyAzureDevOpsPatMissingIfNeeded } from '../repos/azureDevOpsRepoTransport';
 import { GitHubSkillsClient } from '../github/skillsClient';
 
 let extensionUri: vscode.Uri | undefined;
@@ -268,6 +269,8 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Mark
         this._onDidChangeTreeData.fire();
 
         try {
+            notifyAzureDevOpsPatMissingIfNeeded([repo]);
+
             const discovered = await this.githubClient.discoverAreas(repo);
 
             if (Object.keys(discovered).length > 0) {
@@ -316,6 +319,8 @@ export class MarketplaceTreeDataProvider implements vscode.TreeDataProvider<Mark
 
     private async loadRepositoriesProgressively(clearCache: boolean): Promise<void> {
         const repositories = readRepositoriesConfig();
+
+        notifyAzureDevOpsPatMissingIfNeeded(repositories);
 
         const generation = ++this.loadGeneration;
 

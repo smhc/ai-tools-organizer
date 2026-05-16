@@ -11,7 +11,9 @@ import { SkillInstallationService } from '../services/installationService';
 import { SkillPathService } from '../services/skillPathService';
 import { Skill, SkillRepository, InstalledSkill } from '../types';
 import { GitHubSkillsClient } from '../github/skillsClient';
-import { buildItemPathReference, parseGitHubUrl, parseAzureDevOpsGitUrl } from '../extension';
+import { buildItemPathReference, parseGitHubUrl } from '../extension';
+import { parseAzureDevOpsGitUrl } from '../git/azureDevOpsUrl';
+import { isAdoRepository, resolveSkillRepositoryFromConfig } from '../types';
 import { AreaInstalledItemTreeItem, AreaItemFileTreeItem, AreaItemFolderTreeItem } from '../views/installedAreaProvider';
 import { InstalledSkillTreeItem, SkillFileTreeItem, SkillFolderTreeItem } from '../views/installedProvider';
 // import * as myExtension from '../../extension';
@@ -676,6 +678,29 @@ suite('Extension Test Suite', () => {
 
 		test('returns undefined for random string', () => {
 			assert.strictEqual(parseAzureDevOpsGitUrl('not a url at all'), undefined);
+		});
+	});
+
+	suite('resolveSkillRepositoryFromConfig / isAdoRepository', () => {
+		const adoUrl = 'https://dev.azure.com/myOrg/myProject/_git/myRepo';
+
+		test('ADO identity is restored from repositoryUrl when project is missing', () => {
+			const raw = {
+				owner: 'wrongOwner',
+				repo: 'wrongRepo',
+				branch: 'main',
+				repositoryUrl: adoUrl
+			};
+			const resolved = resolveSkillRepositoryFromConfig(raw);
+			assert.strictEqual(resolved.owner, 'myOrg');
+			assert.strictEqual(resolved.project, 'myProject');
+			assert.strictEqual(resolved.repo, 'myRepo');
+			assert.ok(isAdoRepository(raw));
+		});
+
+		test('GitHub-shaped entry without project stays non-ADO', () => {
+			const raw = { owner: 'octocat', repo: 'Hello-World', branch: 'main' };
+			assert.ok(!isAdoRepository(raw));
 		});
 	});
 
