@@ -14,9 +14,8 @@
  *
  *   1. Fetch only the root-level entries (one API call, non-recursive).
  *   2. Intersect those root entries against an allowlist of "interesting" top-level
- *      directories: dot-tooling roots (.cursor, .claude, .cursor-plugin) plus the
+ *      directories: dot-tooling roots (.cursor, .claude, .cursor-plugin, .github) plus the
  *      conventional directory name for every recognised content area (skills, agents, …).
- *      .github is explicitly excluded.
  *   3. For each matching root directory, fetch its subtree recursively (one API call each).
  *   4. If a .cursor-plugin/marketplace.json exists, parse it and also fetch the subtree
  *      of each declared plugin directory.
@@ -31,9 +30,9 @@ import { AzureDevOpsRepoTransport } from '../repos/azureDevOpsRepoTransport';
 
 /**
  * Fixed dot-tooling root directories that are always included in the interesting-prefix
- * allowlist when they appear at the repo root. .github is intentionally absent.
+ * allowlist when they appear at the repo root.
  */
-const DOT_TOOL_DIRS: ReadonlySet<string> = new Set(['.cursor', '.claude', '.cursor-plugin']);
+const DOT_TOOL_DIRS: ReadonlySet<string> = new Set(['.cursor', '.claude', '.cursor-plugin', '.github']);
 
 /**
  * Derive the set of conventional top-level directory names from AREA_DEFINITIONS.
@@ -110,8 +109,7 @@ export class GitHubSkillsClient {
      *
      * Steps:
      *  1. Fetch root entries (one non-recursive API call).
-     *  2. Intersect root directory names against the allowlist (dot-tool dirs + conventional dirs,
-     *     excluding .github).
+     *  2. Intersect root directory names against the allowlist (dot-tool dirs + conventional dirs).
      *  3. Check if .cursor-plugin/marketplace.json is reachable; if so, parse it and add each
      *     declared plugin directory to the prefix set.
      *  4. Fetch each interesting subtree recursively (one API call per prefix).

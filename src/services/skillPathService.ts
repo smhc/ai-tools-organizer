@@ -137,8 +137,15 @@ export class SkillPathService {
     }
 
     /**
+     * Returns true when the extension is running inside Cursor.
+     */
+    private isCursor(): boolean {
+        return vscode.env.appName === 'Cursor';
+    }
+
+    /**
      * Get the currently configured default download location for an area.
-     * Falls back to ~/.copilot/{area}.
+     * Falls back to ~/.cursor/{area} in Cursor, or ~/.copilot/{area} elsewhere.
      */
     getDefaultDownloadLocation(area: ContentArea): string {
         // hooksKiro is fixed
@@ -160,9 +167,9 @@ export class SkillPathService {
             return '~/.cursor/rules';
         }
 
-        // Fallback: ~/.copilot/{area}
+        // Fallback: Cursor → ~/.cursor/{area}, others → ~/.copilot/{area}
         const dirName = AREA_DIR_NAMES[area];
-        return `~/.copilot/${dirName}`;
+        return this.isCursor() ? `~/.cursor/${dirName}` : `~/.copilot/${dirName}`;
     }
 
     /**
@@ -177,7 +184,8 @@ export class SkillPathService {
 
     /**
      * Ensure `AIToolsOrganizer.installLocations` exists in settings.
-     * If the setting is empty or missing, create it with defaults of ~/.copilot/{area} for each area.
+     * If the setting is empty or missing, create it with per-IDE defaults:
+     * Cursor → ~/.cursor/{area}, others → ~/.copilot/{area}.
      */
     async ensureInstallLocations(): Promise<void> {
         const config = vscode.workspace.getConfiguration('AIToolsOrganizer');
@@ -188,7 +196,9 @@ export class SkillPathService {
             return;
         }
 
-        // Build defaults per area. Most use ~/.copilot/{dirName}; some use Cursor-native paths.
+        const cursor = this.isCursor();
+
+        // Build defaults per area.
         const defaults: Record<string, string> = {};
         for (const area of ALL_CONTENT_AREAS) {
             if (area === 'hooksKiro') {
@@ -199,7 +209,7 @@ export class SkillPathService {
                 defaults[area] = '~/.cursor/rules';
             } else {
                 const dirName = AREA_DIR_NAMES[area];
-                defaults[area] = `~/.copilot/${dirName}`;
+                defaults[area] = cursor ? `~/.cursor/${dirName}` : `~/.copilot/${dirName}`;
             }
         }
 
